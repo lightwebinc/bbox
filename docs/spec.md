@@ -181,7 +181,7 @@ pins each step case by case.
 | `created` | the record's `created` written exactly as `YYYY-MM-DDTHH:MM:SSZ` |
 | `quoteId` | optional; a string when present |
 | `payment` | `null`. A payment rides inside the encrypted payload (section 10) |
-| `content` | the BRC-78 message (section 4.3) in standard base64 with padding (RFC 4648 section 4) |
+| `content` | the BRC-78 message (section 4.3) in standard base64 with padding (RFC 4648 section 4), as one unbroken string (no line break or white space anywhere) with zero pad bits, the one spelling of its bytes |
 | `signature` | lowercase hex of the signature (section 4.4) |
 
 Any other member is allowed, is covered by the signature, and is ignored by a
@@ -233,12 +233,33 @@ serialized canonically. Its members:
 | Member | Rule |
 | --- | --- |
 | `body` | optional; the message text, UTF-8. Rendered only through a sanitiser (section 11) |
-| `payment` | optional; a payment made as BRC-169 section 6.1 describes: an object with `beef`, the payment transaction as Atomic BEEF (BRC-95) in standard base64; `derivationPrefix`; and `outputs`, an array with one object per output paid to the recipient, each with `outputIndex`, `derivationSuffix` and `satoshis`. The names follow BRC-169's worked example (appendix A.7); the per-output list is what BRC-29 requires ("the derivation suffix and output index for every output intended for the recipient") and what BRC-100 `internalizeAction` takes, with `from` as the sender's identity key |
-| `refs` | optional; an array of references to content larger than the bound, each an object with `url` (an `https://` or BRC-26 `uhrp://` locator, a hint), `sha256` (64 lowercase hex, the SHA-256 of the bytes as fetched), `length` (their size) and, when the bytes are encrypted, `key` (64 lowercase hex, an AES-256 key drawn at random for that reference and never derived from an identity; the bytes are then an AES-256-GCM ciphertext with its 32-byte IV prepended and its tag appended, BRC-2's symmetric form) |
+| `payment` | optional; a payment made as BRC-169 section 6.1 describes: an object with `beef`, the payment transaction as Atomic BEEF (BRC-95) in standard base64; `derivationPrefix`; and `outputs`, an array with one object per output paid to the recipient, each with `outputIndex`, `derivationSuffix` and `satoshis`. The names follow BRC-169's worked example (appendix A.7); the per-output list is what BRC-29 requires ("the derivation suffix and output index for every output intended for the recipient") and what BRC-100 `internalizeAction` takes, with `from` as the sender's identity key. Field rules below |
+| `refs` | optional; an array of at most 32 references to content larger than the bound, each an object with `url` (an `https://` or BRC-26 `uhrp://` locator, a hint), `sha256` (64 lowercase hex, the SHA-256 of the bytes as fetched), `length` (their size, a non-negative safe integer) and, when the bytes are encrypted, `key` (64 lowercase hex, an AES-256 key drawn at random for that reference and never derived from an identity; the bytes are then an AES-256-GCM ciphertext with its 32-byte IV prepended and its tag appended, BRC-2's symmetric form) |
 
 Unknown members are preserved and ignored. A reference is fetched only by the
 recipient, checked against `length` and `sha256` before it is decrypted or
 used, and never fetched merely because it is named.
+
+Each member's rule, on the parsed value (section 4.1):
+
+- `body` is a string;
+- `refs` is an array of at most 32 objects. 32 references with a key and a
+  locator of a hundred bytes take about 8 KB, which fits the plaintext a
+  16384-byte content holds with room for a body. In each, `url` is a string
+  starting `https://` or `uhrp://`; `sha256` is 64 lowercase hex; `length`
+  is an integer from 0 to 2^53 - 1; `key`, when present, is 64 lowercase
+  hex. Other members of a reference are ignored;
+- `payment` is an object. `beef` is standard padded base64, spelled as
+  `content` is (section 4.2), of an Atomic BEEF (BRC-95); `derivationPrefix`
+  and each `derivationSuffix` are non-empty standard padded base64, spelled
+  the same way; `outputs` is a non-empty array of objects whose
+  `outputIndex` values are distinct, each an integer from 0 to 2^32 - 1,
+  with `satoshis` an integer from 1 to 2^53 - 1. Other members are ignored.
+
+A payment pays the recipient only the outputs it lists. An output of the
+payment transaction that `outputs` does not list is ignored (the sender's
+change is one); a listed output that does not pay the recipient, the
+sender's change among them, is refused (section 4.7).
 
 ### 4.6 The content rule order
 
@@ -255,6 +276,39 @@ this order, and refuses for the first broken:
    recipient;
 4. `content-signature`: `signature` is not lowercase hex of a strict low-S DER
    signature, or does not verify.
+
+### 4.7 The recipient's checks
+
+This section is the recipient client's contract, never a host's: a host
+never sees the plaintext. A recipient that has verified an envelope's
+carrier and content (section 13 steps 1 and 2) checks what it decrypts in
+this order, and refuses for the first check broken with that check's label:
+
+1. `undecryptable`: its wallet cannot decrypt the BRC-78 message (protocol
+   `[2, "message encryption"]`, the message's key id in base64,
+   counterparty `from`). The envelope is shown as undecryptable, never as
+   empty;
+2. `plaintext-json`: the plaintext is not the canonical serialization of a
+   JSON object in the subset of section 4.1;
+3. `plaintext-shape`: `body` or `refs` breaks its rule (section 4.5);
+4. `payment-shape`: `payment` breaks its rule (section 4.5);
+5. `payment-expires`: the envelope's `expires` is 0 or less than
+   `created + 7200` (section 10);
+6. `payment-late`: `now >= expires - 3600`, at the recipient's time `now`;
+7. `payment-beef`: `beef` is not an Atomic BEEF that parses, with its
+   subject transaction;
+8. `payment-output`: a listed output does not exist, does not hold the
+   `satoshis` listed, or is not P2PKH to the key the recipient's wallet
+   derives under BRC-29 (protocol `[2, "3241645161d8"]`, key id
+   `<derivationPrefix> <derivationSuffix>`, counterparty `from`);
+9. `payment-spv`: the payment transaction does not verify against the
+   recipient's own headers (section 10).
+
+Checks 1 to 3 refuse the message. Checks 4 to 9 apply only to a message that
+carries a payment, and refuse only the payment: a client shows the message
+without it and never internalizes it. A payment that passes all nine is what
+the recipient hands its wallet's `internalizeAction`, with `from` as the
+sender's identity key. `payment-v1.json` pins each check case by case.
 
 ## 5. The receipt record
 
@@ -575,6 +629,13 @@ stores nothing. The cost is that a refused object offered again is checked
 again, which the cheap-first order of the rules and a host's rate limits
 bound.
 
+**The BEEF.** Every refusal of a submission's BEEF carries the one label
+`beef`, whatever the transaction is: a BEEF over the host's bound; one that
+does not parse as exactly one BEEF V1 (BRC-62), V2 or Atomic BEEF (BRC-95)
+with nothing after it; one with no transaction, with a transaction of no
+inputs or with a proof of no levels; one without its subject transaction.
+A host that names no bound uses 262144 bytes, the floor of section 12.
+
 Every script comparison below is byte for byte against the script rebuilt
 from the decoded fields and the derived key, exactly as bcommon `pushdrop`
 writes it: the 33-byte compressed key, `OP_CHECKSIG`, each field as one
@@ -596,12 +657,21 @@ owner is the record's `from` or `by`:
 
 1. `carrier-shape`: it does not have exactly one input and exactly one
    output, or the output's value differs from the value of the output the
-   input spends;
+   input spends. When the BEEF does not carry the output the input spends,
+   the value cannot be compared, and the carrier is refused `beef`;
 2. `beef`: the BEEF does not hold exactly two transactions, the carrier and
    the transaction its input spends, and exactly one Merkle path, that
    transaction's, holding only the hashes that path needs (so a carrier's
    funding tree is mined, and nothing else rides along to be stored and
-   served);
+   served). The counts are the BUMPs and transactions the BEEF declares on
+   the wire, before any parser merges proofs of one block or collapses a
+   transaction listed twice, and a txid-only entry counts as a transaction.
+   The carrier is unproven, and the funding tree is proven by the one BUMP,
+   which is minimal: at its lowest level exactly the funding tree's txid,
+   flagged as the txid, and its sibling (a hash, or a duplicate flag); above
+   that exactly one leaf a level, the sibling that level needs; no other
+   leaf flagged as a txid. A funding tree alone in its block has no sibling
+   at the lowest level, so a carrier spending it is refused `beef`;
 3. the record's own rules (sections 3.1 and 5), with their reasons;
 4. `office`: the record's `office` is not this topic's;
 5. `mineable`: `nLockTime < 4102444800`, or the input's `nSequence` is
@@ -633,8 +703,17 @@ input's outpoint is recorded. Without the proof it is refused `unmined`.
 Only output 0 is admitted, so a mined transaction cannot load a host with
 thousands of held outputs, and nothing unmined is admitted, so a stranger
 cannot fill a topic with free outputs. (bcommon `carrier.Sweep` writes its
-tombstone at output 0; a funding tree someone publishes is admitted by the
-same rule and is harmless.)
+tombstone at output 0.)
+
+A transaction whose output 0 is funding-shaped is judged as a sweep before
+anything else, even when it spends an output the topic holds: unmined, it is
+refused `unmined` (so it retains nothing, and what it spends stays held), and
+it is decided again when it arrives mined. A funding tree someone publishes
+has output 0 funding-shaped, so once mined it is admitted by the sweep rule:
+its output 0 is held and its fee input's outpoint is recorded as swept. This
+is harmless: the record says only what the chain says, that a mined
+transaction spent that outpoint, and a mined spend of a carrier's funding
+outpoint retracts the carrier whoever makes it.
 
 **Spend.** A transaction that claims nothing and is not a sweep, but spends
 outputs the topic holds, is accepted for its inputs alone: it retains them.
@@ -809,7 +888,12 @@ broadcasts it. No host sees, relays or settles it as a payment.
   (section 4.5). The BRC-169 envelope's own `payment` member is `null`. The
   sender MUST NOT broadcast the payment: the recipient verifies it against
   its own headers (BRC-67) and internalizes it through its wallet (BRC-100
-  `internalizeAction`), which broadcasts it (BRC-169 section 6.1).
+  `internalizeAction`), which broadcasts it (BRC-169 section 6.1). To verify
+  against its headers is full SPV: the script of every input of the payment
+  and of every unproven ancestor verifies against the output it spends, and
+  every proof in the BEEF verifies against the recipient's headers. There is
+  no fee check: the fee is the sender's affair and the recipient's wallet
+  broadcasts. Section 4.7 gives the order of the recipient's checks.
 - **Why encrypted.** A payment in the clear on a shared plane would be an
   unbroadcast transaction every host and every subscriber could broadcast
   first, which takes from the sender the choice BRC-169 section 8.3 relies
@@ -861,6 +945,7 @@ an escape sequence for exactly this reason.
 | Acknowledgements per receipt | 64 | bounds a receipt and the index work it causes |
 | Entries in a record map | 64 | bounds the work of one record |
 | JSON nesting in the content | 16 | bounds a parse |
+| References in a plaintext (`refs`) | 32 | about 8 KB with keys, within the plaintext a content holds |
 | Envelopes per answer page | 64 | bounds an answer |
 | Receipts per `receipt` answer, sweeps per `sweep` answer | 8 | one is the normal answer |
 | Superseded carriers kept per funding outpoint | 8 | evidence of equivocation; the rest are counted |
@@ -892,8 +977,9 @@ own block headers:
 3. the BRC-78 message: it decrypts with its own key (a failure means the
    sender encrypted something the recipient cannot read: it is shown as
    undecryptable, never as empty);
-4. the plaintext against section 4.5; a `payment` is verified and
-   internalized as section 10 says, and each `refs` entry only when fetched;
+4. the plaintext against sections 4.5 and 4.7; a `payment` is verified and
+   internalized as sections 4.7 and 10 say, and each `refs` entry only when
+   fetched;
 5. whether the envelope was retracted: a host serves nothing retracted, and a
    reader that holds an envelope it read earlier asks the `sweep` class of one
    or more hosts (or a chain source it trusts) for the carrier's funding
@@ -983,7 +1069,7 @@ by the Go side (`make verify` runs both directions).
 | `derivation-v1.json` | the registry values; the keys each test identity derives for `envelope` and `signature` under counterparty `anyone`; the SDK's refusal of `[1, "bbox"]`; two offices with one readable part and different suffixes, and one suffix drawn from fixed bytes |
 | `refusal-v1.json` | byte strings the record and content rules refuse, each with its reason (sections 3.1, 4.6 and 5), and what admission does with an output whose first field it is: skip one that claims no record, or refuse for the reason of the record it claims (which differs where the magic names the other record). Content cases pass every earlier rule and break exactly one |
 | `transaction-v1.json` | transactions as BEEF, each with the previous coins it is admitted with, admitted or refused by the rules of section 8.1 in their order: envelope and receipt carriers, a published funding tree, a sweep and a spend of what the topic holds; and refusals of every carrier rule (shape, BEEF, record, office, mineable, unlock, lock, signature, funding, content), of sweeps and of transactions that are not bbox's. Every input of every case passes the script interpreter, so each refusal is made by its rule alone; a few cases break two rules and are refused for the earlier |
-| `payment-v1.json` | envelopes whose encrypted plaintext carries a payment (sections 4.5 and 10), which the recipient decrypts through its wallet and checks: accepted payments with the outputs it internalizes, and refusals of the plaintext, the payment's shape, its timing, its BEEF, its outputs and its SPV. These are the recipient client's checks, never a host's |
+| `payment-v1.json` | envelopes whose encrypted plaintext carries a payment (sections 4.5 and 10), which the recipient decrypts through its wallet and checks: accepted payments with the outputs it internalizes, and refusals of the plaintext (the reference cap among them), the payment's shape, its timing, its BEEF, its outputs and its SPV, in the order of section 4.7. These are the recipient client's checks, never a host's |
 
 The vectors' office is `example_office_qzxkvbmwtr`; its suffix is a fixed
 example so that the vectors are reproducible. The sender's test key is 32
