@@ -43,6 +43,12 @@ const (
 	PlainRefs    = "refs"
 )
 
+// MaxRefs is the most references a plaintext carries (docs/spec.md section
+// 4.5): 32 references with a key and a locator of a hundred bytes take
+// about 8 KB, which fits the plaintext a 16 KiB content can hold with room
+// for a body.
+const MaxRefs = 32
+
 // PaymentProtocol is BRC-29's derivation protocol: a payment output is
 // P2PKH to the key derived under it with key id "<prefix> <suffix>".
 var PaymentProtocol = wallet.Protocol{SecurityLevel: 2, Protocol: "3241645161d8"}
@@ -131,7 +137,8 @@ func isB64(s string) bool {
 
 // ParsePlaintext applies the plaintext's rules in order: plaintext-json (the
 // bytes are the canonical serialization of a JSON object in the subset),
-// plaintext-shape (body a string; refs an array of well-formed references),
+// plaintext-shape (body a string; refs an array of at most MaxRefs
+// well-formed references),
 // payment-shape (payment an object with beef, derivationPrefix and a
 // non-empty outputs array of distinct output indices). Unknown members are
 // kept in Doc and ignored.
@@ -172,6 +179,9 @@ func parseRefs(v any) ([]Ref, error) {
 	arr, ok := v.([]any)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrPlaintextShape, PlainRefs)
+	}
+	if len(arr) > MaxRefs {
+		return nil, fmt.Errorf("%w: %d refs, at most %d", ErrPlaintextShape, len(arr), MaxRefs)
 	}
 	var out []Ref
 	for i, e := range arr {

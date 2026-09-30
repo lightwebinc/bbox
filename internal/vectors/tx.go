@@ -725,7 +725,7 @@ func (e *txEnv) transactionVectors() (map[string]any, error) {
 	add(txCase{name: "funding-tree-unmined", note: "the sender's funding tree with no proof", rule: "sweep", tx: unminedTree, reason: "unmined"})
 	unminedSweep := cloneTx(e.sweep)
 	unminedSweep.MerklePath = nil
-	add(txCase{name: "sweep-unmined", note: "the sweep with no proof: nothing unmined retracts", rule: "sweep", tx: unminedSweep, reason: "unmined"})
+	add(txCase{name: "sweep-unmined", note: "the sweep with no proof: nothing unmined retracts. It spends the held output 0 of the published funding tree, and is still judged as a sweep rather than a spend: refused, so it retains nothing, and decided again when it arrives mined", rule: "sweep", tx: unminedSweep, reason: "unmined"})
 	stray := cloneTx(e.sweep)
 	stray.MerklePath = transaction.NewMerklePath(unproven, e.sweep.MerklePath.Path)
 	add(txCase{name: "sweep-proof-unknown-height", note: "the sweep with a proof at a height the headers do not hold", rule: "sweep", tx: stray, reason: "unmined"})

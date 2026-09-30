@@ -20,6 +20,13 @@ export const PaymentMinLife = 7200
 /** How long before expires a recipient stops internalizing. */
 export const PaymentMargin = 3600
 
+/**
+ * The most references a plaintext carries (spec section 4.5): 32 with a key
+ * and a locator of a hundred bytes take about 8 KB, which fits the
+ * plaintext a 16 KiB content can hold with room for a body.
+ */
+export const MaxRefs = 32
+
 /** The bound on a payment's BEEF: it rides inside the content. */
 const MaxPaymentBEEF = 16 << 10
 
@@ -76,6 +83,7 @@ const safeInt = (v: unknown): v is number => typeof v === 'number' && Number.isS
 
 function parseRefs(v: unknown): Ref[] {
   if (!Array.isArray(v)) throw new Refusal('plaintext-shape', 'refs')
+  if (v.length > MaxRefs) throw new Refusal('plaintext-shape', `${v.length} refs, at most ${MaxRefs}`)
   return v.map((e, i) => {
     if (!(e instanceof JObject)) throw new Refusal('plaintext-shape', `refs[${i}]`)
     const url = e.get('url')

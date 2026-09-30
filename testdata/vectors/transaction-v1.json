@@ -993,7 +993,7 @@
     },
     {
       "name": "sweep-unmined",
-      "note": "the sweep with no proof: nothing unmined retracts",
+      "note": "the sweep with no proof: nothing unmined retracts. It spends the held output 0 of the published funding tree, and is still judged as a sweep rather than a spend: refused, so it retains nothing, and decided again when it arrives mined",
       "rule": "sweep",
       "txid": "b84b5fd2ae6b8be8498c291007de5eebb2e2551aa09b15a065a173dfd132758c",
       "rawTx": "010000000201918b3b6084e36fd844b50a38b0b882cf18a0abe3f218e842b2db94433cfddc000000004847304402200b2e6a06a9dc7c3cc56ede7e8a3a945586017217b928a3599082d8754e37d63602200f933c2e8514581317db67f38908a716703799542722ff8782518969816dd6e841ffffffff01918b3b6084e36fd844b50a38b0b882cf18a0abe3f218e842b2db94433cfddc010000004847304402204585d0d2566d58ef9dd56e985a391a6acbcdbd1247f9cc6da2024076cf4df1ed02200bdc77c10cf19bc79a805a78ae6613219f92613f703fec3de081170dd58770c941ffffffff01af060000000000002821022dee4a758463ddab6d5529f6257061c4d94b72df4d1c4ee728594f5ebb7aced5ac036262027500000000",

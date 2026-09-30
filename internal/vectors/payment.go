@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -126,6 +127,22 @@ func canonicalPlain(f func(o *boxrec.Object)) string {
 	return string(b)
 }
 
+// refsList is n well-formed references, each with a key, as a plaintext's
+// refs member carries them.
+func refsList(n int) []any {
+	var list []any
+	for i := 0; i < n; i++ {
+		digest, key := fixed32(fmt.Sprintf("refs/digest/%d", i)), fixed32(fmt.Sprintf("refs/key/%d", i))
+		list = append(list, &boxrec.Object{Members: []boxrec.Member{
+			{Name: "key", Value: hex.EncodeToString(key[:])},
+			{Name: "length", Value: boxrec.Int(4096 + i)},
+			{Name: "sha256", Value: hex.EncodeToString(digest[:])},
+			{Name: "url", Value: fmt.Sprintf("https://files.example.com/r/%x", digest[:8])},
+		}})
+	}
+	return list
+}
+
 // paymentEnvelope seals plaintext from the sender to the recipient in box
 // payment_inbox.
 func (e *txEnv) paymentEnvelope(label, plaintext string, created, expires uint64) (*sealed, error) {
@@ -245,6 +262,16 @@ func (e *txEnv) paymentVectors() (map[string]any, error) {
 		{"payment-to-another-recipient", "a payment whose outputs are derived for the third identity, not the recipient", plaintextWith(toOther, p.prefix, outs), created, created + day, now, "payment-output"},
 		{"payment-change-listed", "the sender's change output listed as paid to the recipient", withPayment(paymentObject(b64, p.prefix, []payOut{{2, p.suffixes[0], int64(p.tx.Outputs[2].Satoshis)}})), created, created + day, now, "payment-output"},
 		{"payment-parent-unproven", "the payment's parent carries a proof at a height the recipient's headers do not hold", plaintextWith(strayBEEF, p.prefix, outs), created, created + day, now, "payment-spv"},
+		{"plaintext-refs-at-cap", "the payment beside 32 references, the most a plaintext carries", canonicalPlain(func(o *boxrec.Object) {
+			o.Set(boxrec.PlainBody, "Paid for the report.")
+			o.Set(boxrec.PlainPayment, paymentObject(b64, p.prefix, outs))
+			o.Set(boxrec.PlainRefs, refsList(boxrec.MaxRefs))
+		}), created, created + day, now, ""},
+		{"plaintext-refs-over-cap", "the payment beside 33 references, one more than a plaintext carries", canonicalPlain(func(o *boxrec.Object) {
+			o.Set(boxrec.PlainBody, "Paid for the report.")
+			o.Set(boxrec.PlainPayment, paymentObject(b64, p.prefix, outs))
+			o.Set(boxrec.PlainRefs, refsList(boxrec.MaxRefs+1))
+		}), created, created + day, now, "plaintext-shape"},
 	}
 	var list []paymentJSON
 	for i, c := range cases {
