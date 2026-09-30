@@ -18,6 +18,9 @@
  *   BBOX_PAYEE_KEY        the payee's private key, 64 hex characters
  *   BBOX_HEADERS_URL      the header source payments verify against;
  *                         OVERLAY_CHAIN_TRACKER_URL when unset
+ *   BBOX_SESSIONS         the most BRC-104 sessions the terms route keeps;
+ *                         default 10000
+ *   BBOX_SESSION_TTL      seconds an idle BRC-104 session is kept; default 600
  *
  * Every `tm_bbox_` topic in OVERLAY_TOPICS must be an office named here,
  * because a bbox topic left to the host's default manager would admit
@@ -31,7 +34,7 @@ import { DefaultMaxBEEF } from './beef.js'
 import { LookupService, TopicPrefix, checkOffice, topic } from './boxrec.js'
 import { FileJournal, type Journal } from './journal.js'
 import { BboxLookupService, FloorDays } from './ls_bbox.js'
-import { HeaderTracker, LedgerReceiver, LookupFront, parsePrices } from './paid.js'
+import { DefaultMaxSessions, DefaultSessionTTL, HeaderTracker, LedgerReceiver, LookupFront, parsePrices } from './paid.js'
 import { AdmitKinds, BboxTopicManager, Reasons } from './tm_bbox.js'
 
 /**
@@ -53,6 +56,7 @@ export interface Config {
   prices: Map<string, number>
   payeeKey?: PrivateKey
   headersURL?: string
+  sessions: { max: number; ttlSeconds: number }
 }
 
 /** Parses BBOX_OFFICES. Throws on anything it cannot take exactly. */
@@ -92,6 +96,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     retentionDays: integer('BBOX_RETENTION_DAYS', env['BBOX_RETENTION_DAYS'], FloorDays, FloorDays),
     maxBEEF: integer('BBOX_MAX_BEEF', env['BBOX_MAX_BEEF'], DefaultMaxBEEF, DefaultMaxBEEF),
     prices: parsePrices(env['BBOX_PRICES']),
+    sessions: {
+      max: integer('BBOX_SESSIONS', env['BBOX_SESSIONS'], DefaultMaxSessions, 1),
+      ttlSeconds: integer('BBOX_SESSION_TTL', env['BBOX_SESSION_TTL'], DefaultSessionTTL, 1),
+    },
   }
   const listen = env['BBOX_LISTEN']?.trim()
   if (listen !== undefined && listen !== '') {
@@ -163,6 +171,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
       wallet: c.payeeKey === undefined ? undefined : new ProtoWallet(c.payeeKey),
       receiver: priced.size > 0 ? new LedgerReceiver(c.stateDir) : undefined,
       headers: c.headersURL === undefined ? undefined : new HeaderTracker(c.headersURL),
+      sessions: c.sessions,
     })
   }
   const start = async (): Promise<Server | undefined> => {
@@ -182,6 +191,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
     lookup: LookupService,
     terms: c.listen === undefined ? 'none' : `${c.listen.host}:${c.listen.port}`,
     priced: [...priced].join(',') || 'none',
+    sessions: c.listen === undefined ? 'none' : `${c.sessions.max}, idle ${c.sessions.ttlSeconds}s`,
     build,
   })
   return { module: { topics, lookups: { [LookupService]: ls } }, ls, front, start }

@@ -45,7 +45,7 @@ function engine(mod: Module, storage: MemoryStorage, chain: Chain): Engine {
   )
 }
 
-const config: Config = { offices: [office], stateDir: '/nonexistent', retentionDays: 31, maxBEEF: 262144, prices: new Map() }
+const config: Config = { offices: [office], stateDir: '/nonexistent', retentionDays: 31, maxBEEF: 262144, prices: new Map(), sessions: { max: 100, ttlSeconds: 600 } }
 
 /** A module and its engine, with storage handed over as the host does. */
 async function setup(opts: { naive?: boolean; journal?: MemoryJournal; chain?: Chain } = {}) {

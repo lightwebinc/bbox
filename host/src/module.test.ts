@@ -45,6 +45,10 @@ test('the configuration: a state directory is required, floors hold, and a price
   })
   assert.deepEqual([priced.listen, priced.headersURL, priced.prices.get('history')], [{ host: '::1', port: 8081 }, 'http://127.0.0.1:1', 5])
   assert.equal(parseConfig({ ...base, BBOX_RETENTION_DAYS: '90', BBOX_MAX_BEEF: '1048576' }).retentionDays, 90)
+  assert.deepEqual(c.sessions, { max: 10000, ttlSeconds: 600 }, 'the BRC-104 session bound has a default')
+  assert.deepEqual(parseConfig({ ...base, BBOX_SESSIONS: '50', BBOX_SESSION_TTL: '60' }).sessions, { max: 50, ttlSeconds: 60 })
+  assert.throws(() => parseConfig({ ...base, BBOX_SESSIONS: '0' }), /BBOX_SESSIONS/)
+  assert.throws(() => parseConfig({ ...base, BBOX_SESSION_TTL: 'soon' }), /BBOX_SESSION_TTL/)
 })
 
 /** The reference loader's checks on what a factory returned. */

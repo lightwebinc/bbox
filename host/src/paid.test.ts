@@ -21,11 +21,12 @@ import {
   Transaction,
   Utils,
   createNonce,
+  type PeerSession,
   type WalletInterface,
 } from '@bsv/sdk'
 import { MemoryJournal } from './journal.js'
 import { bboxModule } from './module.js'
-import { LedgerReceiver, LookupFront, MemoryReceiver, parsePrices, termsDocument, type ReceivedPayment } from './paid.js'
+import { BoundedSessions, LedgerReceiver, LookupFront, MemoryReceiver, parsePrices, termsDocument, type ReceivedPayment } from './paid.js'
 import { PaymentProtocol } from './payment.js'
 import { Chain, Party, PayingWallet, carrier, commitment, envelopeRecord, fromNowhere, fundingTree, receiptRecord } from './testmint.js'
 import { FakeHost, MemoryStorage, quietConsole } from './testutil.js'
@@ -44,6 +45,8 @@ interface Rig {
   client: Party
   chain: Chain
   env: string
+  front: LookupFront
+  host: FakeHost
 }
 
 const servers: Server[] = []
@@ -52,10 +55,10 @@ after(() => {
 })
 
 /** A module with one envelope, engine and storage, and its terms route on a free port. */
-async function rig(prices: string): Promise<Rig> {
+async function rig(prices: string, sessions?: { max: number; ttlSeconds: number }): Promise<Rig> {
   const host = new FakeHost()
   const chain = new Chain(11000)
-  const m = bboxModule(host, { offices: [office], stateDir: '/nonexistent', retentionDays: 31, maxBEEF: 262144, prices: parsePrices(prices) }, [topic], new MemoryJournal())
+  const m = bboxModule(host, { offices: [office], stateDir: '/nonexistent', retentionDays: 31, maxBEEF: 262144, prices: parsePrices(prices), sessions: { max: 100, ttlSeconds: 600 } }, [topic], new MemoryJournal())
   const storage = new MemoryStorage()
   await m.ls.restore([], storage)
   const engine = new Engine(m.module.topics as never, m.module.lookups as never, storage as never, chain.tracker, undefined, [], [], undefined, undefined, { [topic]: false }, false, undefined, undefined, undefined, quietConsole())
@@ -69,10 +72,10 @@ async function rig(prices: string): Promise<Rig> {
   const rc = await carrier(fundingTree(client, 1, chain), 0, client, receiptRecord(office, client, [commitment(read)], now))
   for (const x of [open, read, rc]) await engine.submit({ beef: x.toAtomicBEEF(), topics: [topic] })
   const receiver = new MemoryReceiver()
-  const front = new LookupFront({ ls: m.ls, host, prices: parsePrices(prices), wallet: payeeWallet, receiver, headers: chain.tracker })
+  const front = new LookupFront({ ls: m.ls, host, prices: parsePrices(prices), wallet: payeeWallet, receiver, headers: chain.tracker, sessions })
   const server = await front.listen(0, '127.0.0.1')
   servers.push(server)
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, server, receiver, wallet: new PayingWallet(client.key, chain), client, chain, env: read.id('hex') }
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, server, receiver, wallet: new PayingWallet(client.key, chain), client, chain, env: read.id('hex'), front, host }
 }
 
 const post = (body: unknown, headers: Record<string, string> = {}): { method: string; headers: Record<string, string>; body: string } => ({
@@ -212,4 +215,50 @@ test('the payment ledger keeps every accepted payment across a restart and refus
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+const session = (nonce: string, key: string, lastUpdate = 0): PeerSession => ({ isAuthenticated: true, sessionNonce: nonce, peerIdentityKey: key, lastUpdate })
+
+test('the BRC-104 session store is bounded: a cap that forgets the least recently used, and an idle life', () => {
+  let now = 1_000
+  const evicted: string[] = []
+  const s = new BoundedSessions(2, 60_000, () => now, (why) => evicted.push(why))
+  s.addSession(session('n1', 'k1'))
+  s.addSession(session('n2', 'k2'))
+  assert.equal(s.getSession('n1')?.sessionNonce, 'n1', 'a lookup touches n1, so n2 is now the least recently used')
+  s.addSession(session('n3', 'k3'))
+  assert.equal(s.size, 2)
+  assert.equal(s.hasSession('n2'), false, 'the least recently used went at the cap')
+  assert.deepEqual(evicted, ['cap'])
+  assert.equal(s.getSession('k3')?.sessionNonce, 'n3', 'looked up by identity key too')
+  s.updateSession(session('n3', 'k3', 5))
+  assert.equal(s.size, 2)
+  now += 60_000
+  assert.equal(s.getSession('n1'), undefined, 'idle for the whole life: forgotten')
+  assert.equal(s.getSession('k3'), undefined)
+  assert.equal(s.size, 0)
+  assert.deepEqual(evicted, ['cap', 'idle', 'idle'])
+  s.addSession(session('n4', 'k4'))
+  s.removeSession(session('n4', 'k4'))
+  assert.equal(s.hasSession('k4'), false)
+  assert.throws(() => new BoundedSessions(0, 1), /max/)
+  assert.throws(() => s.addSession({ isAuthenticated: false, lastUpdate: 0 }), /sessionNonce/)
+})
+
+test('the terms route keeps at most its bound of sessions; a client whose session went shakes hands again', async () => {
+  const r = await rig('history=5', { max: 2, ttlSeconds: 600 })
+  const ask = { service: 'ls_bbox', query: { office, to: r.client.hex } }
+  const clients = [0, 1, 2].map(() => new AuthFetch(new ProtoWallet(PrivateKey.fromRandom()) as unknown as WalletInterface))
+  for (const c of clients) assert.equal((await c.fetch(`${r.url}/lookup`, post(ask))).status, 200)
+  assert.equal(r.front.sessions.size, 2, 'three handshakes, two sessions kept')
+  assert.equal(r.host.count('bbox_sessions_evicted_total', { why: 'cap' }), 1)
+  assert.equal(r.host.gauges.get('bbox_sessions')?.(), 2)
+  // The first client's session went: its client finds its request refused
+  // and shakes hands again, which the bound admits in place of the oldest.
+  const res = await quietly(async () => await clients[0]!.fetch(`${r.url}/lookup`, post(ask)))
+  assert.equal(res.status, 200)
+  assert.equal(r.host.count('bbox_sessions_evicted_total', { why: 'cap' }), 2, 'its new session took the place of the oldest')
+  const again = new AuthFetch(new ProtoWallet(PrivateKey.fromRandom()) as unknown as WalletInterface)
+  assert.equal((await again.fetch(`${r.url}/lookup`, post(ask))).status, 200, 'a new handshake is answered')
+  assert.equal(r.front.sessions.size, 2)
 })
