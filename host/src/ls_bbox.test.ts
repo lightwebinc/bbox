@@ -200,7 +200,10 @@ test('at most 8 superseded carriers are kept per outpoint, 64 once the winner is
   for (let i = 0; i < 12; i++) more.push(await letter(tree, 1, alice, bob, 'files', T0 - 100, 0, LockTime + i))
   const winner = [...more].sort((a, b) => (c(a) < c(b) ? -1 : 1))[0]!
   await feed(r, await receipt(bTree, 0, bob, [winner], T0))
-  for (const e of more) await feed(r, e)
+  // The acknowledged winner first: until it arrives the outpoint's winner is
+  // not acknowledged, the cap is 8, and a ninth superseded carrier arriving
+  // before it would be dropped for good.
+  for (const e of [winner, ...more.filter((x) => x !== winner)]) await feed(r, e)
   assert.equal(r.host.count('bbox_dropped_total', { why: 'evidence' }), 3)
   assert.equal(r.ls.status(c(winner)), 'acknowledged')
 })
