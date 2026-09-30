@@ -78,8 +78,11 @@ With `BBOX_LISTEN` set, the module serves, beside the host:
 | `POST /lookup` | the same BRC-24 questions as the host's `/lookup` |
 
 Its base URL is what the host publishes as `ls_bbox`'s base (BRC-180
-`metanet.overlays`). A reverse proxy in front of it must pass the path
-unchanged, because a BRC-104 signature covers it.
+`metanet.overlays`), and it is an origin with no path: a BRC-104 client
+shakes hands at the origin's `/.well-known/auth`, and the route answers at
+its root. A reverse proxy in front of it gives it an origin of its own (a
+name, or a port) and passes the path unchanged, because a BRC-104
+signature covers it.
 
 A free question is answered with or without BRC-104. A question of a class
 the host prices must be asked over BRC-104: without an `x-bsv-payment`

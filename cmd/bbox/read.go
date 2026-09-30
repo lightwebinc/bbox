@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -278,7 +279,7 @@ func cmdRead(ctx context.Context, g *global, args []string) error {
 		e := it.Envelope()
 		rec := state.Received{Txid: it.Txid, Office: e.Office, From: hex.EncodeToString(e.From), Box: e.Box, Created: e.Created, Expires: e.Expires}
 		if m.Payment != nil {
-			rec.Paid = m.Paid()
+			rec.Paid, rec.Beef = m.Paid(), hex.EncodeToString(it.Beef)
 		}
 		h.st.Remember(rec)
 	}
@@ -415,7 +416,20 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 	}
 	it := l.Find(pos[0])
 	if it == nil {
-		return incomplete("no host answers %s in the %s: acknowledged, expired or retracted, or never sent", pos[0], v)
+		// Acknowledged, or no longer answered: the carrier read kept is
+		// checked again, against this home's headers, as a host's answer is.
+		kept := h.st.ReceivedByTxid(pos[0])
+		if kept == nil || kept.Beef == "" {
+			return incomplete("no host answers %s in the %s: acknowledged, expired or retracted, or never sent (read an envelope before it is acknowledged, and its payment is kept for internalize)", pos[0], v)
+		}
+		raw, err := hex.DecodeString(kept.Beef)
+		if err != nil {
+			return err
+		}
+		if it, err = reader.Verify(ctx, raw, kept.Office, boxrec.TxEnvelope, h.e.Signer().Identity.Compressed(), rd.Headers); err != nil {
+			return refused("%s: the carrier kept when it was read does not verify now (%s): %v", pos[0], boxrec.Reason(err), err)
+		}
+		g.say("%s: no host answers it now; using the carrier kept when it was read", pos[0])
 	}
 	m := reader.Open(ctx, h.e, g.cfg.Originator, it, rd.Headers, time.Now())
 	switch {
@@ -451,7 +465,7 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 		return err
 	}
 	rec := h.st.Remember(state.Received{Txid: it.Txid, Office: e.Office, From: hex.EncodeToString(e.From), Box: e.Box, Created: e.Created, Expires: e.Expires, Paid: m.Paid()})
-	rec.Internalized = m.Payment.TxID().String()
+	rec.Internalized, rec.Beef = m.Payment.TxID().String(), ""
 	if err := h.st.Save(); err != nil {
 		return err
 	}
@@ -504,6 +518,9 @@ func cmdHistory(ctx context.Context, g *global, args []string) error {
 	}
 	if base == "" {
 		return usage("no host to ask: set history_host (or -at) to the host's terms route base URL")
+	}
+	if u, err := url.Parse(base); err != nil || u.Scheme == "" || u.Host == "" || (u.Path != "" && u.Path != "/") {
+		return usage("history_host %q is not an origin: the terms route is at the root of its own origin, where BRC-104 shakes hands (docs/host.md)", termsafe.Abbrev(base))
 	}
 	off, err := g.office(*office)
 	if err != nil {

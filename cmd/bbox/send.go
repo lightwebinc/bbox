@@ -278,9 +278,16 @@ func cmdAck(ctx context.Context, g *global, args []string) error {
 	if *all {
 		for i := range h.st.Received {
 			r := &h.st.Received[i]
-			if r.Acked == "" && (*office == "" || r.Office == *office) {
-				add(r)
+			if r.Acked != "" || (*office != "" && r.Office != *office) {
+				continue
 			}
+			if r.Paid > 0 && r.Internalized == "" {
+				// A recipient that internalizes acknowledges; -all leaves the
+				// envelope to internalize, which works after an ack too.
+				g.say("%s carries a payment of %d sat not yet taken: bbox internalize %s (it acknowledges), or ack it by txid", r.Txid, r.Paid, r.Txid)
+				continue
+			}
+			add(r)
 		}
 		if len(order) == 0 {
 			fmt.Fprintln(g.stdout, "nothing to acknowledge: every envelope read is acknowledged")

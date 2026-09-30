@@ -84,7 +84,7 @@ ignored.
 | `box` | none | the box `send` addresses and `list`, `read` ask about when none is named. None: `send` uses `inbox`, and `list` and `read` ask about every box |
 | `facade` | none | mode `plane`: the overlay host a publisher submits to (its `/submit` route), from which the plane delivers to every subscribed host. Refused in mode `unicast` |
 | `header_url` | none | the header source every proof is checked against: an overlay bridge's base URL (native `/v1/root/<height>` and `/v1/tip`), `woc:main`, `woc:test` or `chaintracks:URL` |
-| `history_host` | none | the base URL of `ls_bbox` on the host `history` asks and `terms` reads: the host's terms route (spec section 7.4) |
+| `history_host` | none | the base URL of `ls_bbox` on the host `history` asks and `terms` reads: the host's terms route (spec section 7.4). An origin, with no path: BRC-104 authenticates at the origin's `/.well-known/auth`, and the route answers `/lookup` and `/ls_bbox/terms` at its root |
 | `home` | `~/.bbox` | the identity's home |
 | `hosts` | none | the overlay hosts, comma separated, at most 16: every host a reader asks and compares; in mode `unicast` every host a publisher submits to; in mode `plane` the hosts other than `facade` a sweep is also sent to directly |
 | `mode` | `plane` | `plane` or `unicast`: how a publisher's objects reach the hosts (spec section 9) |
@@ -122,7 +122,7 @@ settle       = rpc:http://192.0.2.10:9292
 facade       = https://host-a.example.com
 hosts        = https://host-a.example.com,https://host-b.example.com
 header_url   = https://headers.example.com
-history_host = https://host-a.example.com/bbox
+history_host = https://terms.host-a.example.com
 ```
 
 The same without the plane, submitting to both hosts itself:
@@ -312,7 +312,12 @@ headers, broadcasts it through `settle`, waits for its proof, and adds the
 outputs to the pool with their derivation, so the pool can spend them. The
 envelope is then acknowledged, unless `-no-ack`. A payment the network
 refuses because the sender spent its inputs is reported as reclaimed or
-double-spent, exit 1. Running it again after a timeout is safe.
+double-spent, exit 1. Running it again after a timeout is safe. An
+envelope whose payment passed `read`'s checks is kept in the home until its
+payment is taken, so `internalize` works after the envelope is
+acknowledged too, when no host answers it any more: the kept carrier is
+checked again against the headers, as a host's answer is. `ack -all`
+leaves such an envelope out, and names it.
 
 ## Retracting
 
@@ -394,7 +399,7 @@ facade      https://host-a.example.com
 settle      rpc:http://192.0.2.10:9292
 host        https://host-a.example.com answering
 host        https://host-b.example.com answering
-history     https://host-a.example.com/bbox serves terms (2 priced class(es))
+history     https://terms.host-a.example.com serves terms (2 priced class(es))
 ```
 
 It reads only: it publishes nothing and spends nothing.

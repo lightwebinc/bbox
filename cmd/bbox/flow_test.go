@@ -66,6 +66,21 @@ func TestPaymentInsideAnEnvelopeIsInternalized(t *testing.T) {
 	if !strings.Contains(r.stdout, "internalized already") {
 		t.Fatalf("internalize again:\n%s", r.stdout)
 	}
+	// ack -all leaves a payment to internalize; acknowledged by txid, no
+	// host answers it any more, and internalize checks the carrier kept.
+	tx2 := h.send("alice", bob, "another", "-pay", "3000")
+	plain := h.send("alice", bob, "no money")
+	h.must("bob", "", "read")
+	r = h.must("bob", "", "ack", "-all")
+	if !strings.Contains(r.stderr, tx2+" carries a payment of 3000 sat not yet taken") || !strings.Contains(r.stdout, "acknowledged 1 envelope(s)") {
+		t.Fatalf("ack -all:\n%s\n%s", r.stdout, r.stderr)
+	}
+	_ = plain
+	h.must("bob", "", "ack", tx2)
+	r = h.must("bob", "", "internalize", tx2)
+	if !strings.Contains(r.stderr, "using the carrier kept when it was read") || !strings.Contains(r.stdout, "internalized 3000 sat") {
+		t.Fatalf("internalize after ack:\n%s\n%s", r.stdout, r.stderr)
+	}
 	r = h.must("bob", "", "doctor")
 	if !strings.Contains(r.stdout, "identity    "+bob) {
 		t.Fatalf("doctor:\n%s", r.stdout)
@@ -277,4 +292,12 @@ func TestMintAheadDoesNotWaitForABlock(t *testing.T) {
 	if strings.Count(r.stdout, "\n") != 5 {
 		t.Fatalf("list:\n%s\n%s", r.stdout, r.stderr)
 	}
+}
+
+func TestHistoryHostIsAnOrigin(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.identity("bob")
+	h.newOffice("bob")
+	h.want(h.run("bob", "", "history", "-at", "https://terms.example.com/bbox"), exitUsage, "is not an origin")
 }

@@ -151,8 +151,12 @@ type Received struct {
 	Expires uint64 `json:"expires,omitempty"`
 	// Paid is the satoshis the envelope's payment offers, when it passed
 	// the recipient's checks; Internalized the payment's txid once taken.
+	// Beef is the envelope's carrier, hex, kept while its payment is not
+	// taken: once the envelope is acknowledged no free question answers
+	// it, and the payment is still the recipient's to take.
 	Paid         uint64 `json:"paid,omitempty"`
 	Internalized string `json:"internalized,omitempty"`
+	Beef         string `json:"beef,omitempty"`
 	// Acked is the receipt that acknowledges it.
 	Acked string `json:"acked,omitempty"`
 }
@@ -227,6 +231,9 @@ func (s *State) Remember(r Received) *Received {
 		old.Office, old.From, old.Box, old.Created, old.Expires = r.Office, r.From, r.Box, r.Created, r.Expires
 		if r.Paid != 0 {
 			old.Paid = r.Paid
+		}
+		if r.Beef != "" && old.Internalized == "" {
+			old.Beef = r.Beef
 		}
 		return old
 	}
