@@ -149,6 +149,13 @@ func Reason(err error) string {
 		{ErrContentJSON, "content-json"}, {ErrContentShape, "content-shape"},
 		{ErrContentCipher, "content-cipher"}, {ErrContentSignature, "content-signature"},
 		{ErrQuery, "query"},
+		{ErrCarrierShape, "carrier-shape"}, {ErrBEEF, "beef"}, {ErrMineable, "mineable"},
+		{ErrUnlock, "unlock"}, {ErrLock, "lock"}, {ErrSignature, "signature"},
+		{ErrFunding, "funding"}, {ErrUnmined, "unmined"}, {ErrNotBbox, "not-bbox"},
+		{ErrUndecryptable, "undecryptable"}, {ErrPlaintextJSON, "plaintext-json"}, {ErrPlaintextShape, "plaintext-shape"},
+		{ErrPaymentShape, "payment-shape"}, {ErrPaymentExpires, "payment-expires"},
+		{ErrPaymentLate, "payment-late"}, {ErrPaymentBEEF, "payment-beef"},
+		{ErrPaymentOutput, "payment-output"}, {ErrPaymentSPV, "payment-spv"},
 	} {
 		if errors.Is(err, e.err) {
 			return e.s
