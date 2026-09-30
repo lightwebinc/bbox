@@ -1,0 +1,73 @@
+{
+  "classifierPrefix": {
+    "envelope": "004462626501",
+    "receipt": "004462627201"
+  },
+  "description": "Registry values and the keys they derive for the two test identities, counterparty anyone, forSelf true on the owner's side (docs/spec.md section 6). Key id fund is the embedded wallet's funding key, derived under counterparty self; no reader or host derives it, so it has no entry here.",
+  "drawnOffice": {
+    "note": "NewOffice over these bytes: each byte below 234 gives the letter a + byte mod 26; bytes 234 to 255 are skipped",
+    "office": "example_office_hhyhhyhhyh",
+    "randomBytes": "07fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b407fa21b4"
+  },
+  "fundKeyId": "fund",
+  "identities": {
+    "recipient": "027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007",
+    "sender": "0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c"
+  },
+  "keys": [
+    {
+      "identity": "sender",
+      "invoice": "1-bbox message-envelope",
+      "keyId": "envelope",
+      "lockingKey": "022dee4a758463ddab6d5529f6257061c4d94b72df4d1c4ee728594f5ebb7aced5"
+    },
+    {
+      "identity": "sender",
+      "invoice": "1-bbox message-signature",
+      "keyId": "signature",
+      "lockingKey": "03919d615c0cfff49de5aacfe1258e8534625602b5fda0e86f301aa046cc9812be"
+    },
+    {
+      "identity": "recipient",
+      "invoice": "1-bbox message-envelope",
+      "keyId": "envelope",
+      "lockingKey": "02b98ab869afad71e0a3616462dbe119fac8367e7e3d628f619498b0f0a3770f9e"
+    },
+    {
+      "identity": "recipient",
+      "invoice": "1-bbox message-signature",
+      "keyId": "signature",
+      "lockingKey": "03c749f048584ae21e369d0657241c60e8a5dbddc5f059f11d72d1f5ea89111418"
+    }
+  ],
+  "lookupService": "ls_bbox",
+  "magicEnvelope": "62626501",
+  "magicReceipt": "62627201",
+  "maxOfficeName": 31,
+  "offices": [
+    {
+      "name": "example_office",
+      "office": "example_office_qzxkvbmwtr",
+      "suffix": "qzxkvbmwtr",
+      "topic": "tm_bbox_example_office_qzxkvbmwtr"
+    },
+    {
+      "name": "example_office",
+      "office": "example_office_hdjvnwpxle",
+      "suffix": "hdjvnwpxle",
+      "topic": "tm_bbox_example_office_hdjvnwpxle"
+    }
+  ],
+  "officesNote": "Two offices with one readable part and different suffixes: different offices, different topics. Suffixes here are fixed examples; a real office draws its suffix at random when it is created.",
+  "protocol": [
+    1,
+    "bbox message"
+  ],
+  "refusedProtocol": {
+    "protocol": "bbox",
+    "sdkError": "failed to compute invoice number: protocol names must be 5 characters or more"
+  },
+  "suffixLength": 10,
+  "tagFunding": "626202",
+  "topicPrefix": "tm_bbox_"
+}

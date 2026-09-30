@@ -1,0 +1,306 @@
+{
+  "description": "Envelope records (docs/spec.md sections 3 and 4). Sender: the test key 32 bytes of 0x42; recipient: 32 bytes of 0x43. Each BRC-78 key id and IV is a fixed stand-in for 32 random bytes, SHA-256(\"bbox/vector/keyid/<label>\") and SHA-256(\"bbox/vector/iv/<label>\"), so the ciphertext is reproducible; a real sender draws both at random. signedJson is the RFC 8785 serialization of the BRC-169 envelope without content and signature; the signature is over SHA-256 of it (signedHash) under signatureKey, the sender's key for [1, \"bbox message\"], key id signature, counterparty anyone. carrierFieldHash is SHA-256 of the record, which the carrier's field signature covers.",
+  "envelopes": [
+    {
+      "name": "envelope-note",
+      "note": "a note to box inbox; the plaintext's body carries ESC [2J, which a renderer strips; the record carries unknown key 24, which a reader preserves and ignores",
+      "office": "example_office_qzxkvbmwtr",
+      "topic": "tm_bbox_example_office_qzxkvbmwtr",
+      "to": "027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007",
+      "box": "inbox",
+      "from": "0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c",
+      "created": 1767225600,
+      "createdRfc3339": "2026-01-01T00:00:00Z",
+      "expires": 0,
+      "plaintext": "{\"body\":\"Lunch at noon? \\u001b[2Jcleared?\"}",
+      "brc78KeyId": "a1ce30521886a36e78d6f3324e74eb46b6efa943be20c63edd7a18a941b01182",
+      "brc78Iv": "656b2df70f22cd0d8a258f4e19c0065dc5b8439b9fd76858f38380d9e9e51b7b",
+      "brc78": "424210330324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007a1ce30521886a36e78d6f3324e74eb46b6efa943be20c63edd7a18a941b01182656b2df70f22cd0d8a258f4e19c0065dc5b8439b9fd76858f38380d9e9e51b7bffb3646084595224e3a3d2bc11b4e7df8f3af3c276840541aa32bb9c159053528efe0809b744c743169d9d55033646d61ec1165363be46a87c4f0c",
+      "content": "{\"content\":\"QkIQMwMkZT6sQ0SIACzAa7+38Q/hiZHjX5/kMC2+ptI1PcCrHAJ/MevFRiwf3OG3N+z/UtN9dd6kPOEcdNJaopcWX6ogB6HOMFIYhqNueNbzMk5060a276lDviDGPt16GKlBsBGCZWst9w8izQ2KJY9OGcAGXcW4Q5uf12hY84OA2enlG3v/s2RghFlSJOOj0rwRtOffjzrzwnaEBUGqMrucFZBTUo7+CAm3RMdDFp2dVQM2RtYewRZTY75GqHxPDA==\",\"created\":\"2026-01-01T00:00:00Z\",\"metanetHandles\":\"1.0\",\"payment\":null,\"recipient\":{\"domain\":\"example.com\",\"handle\":\"robin\",\"identityKey\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"},\"sender\":{\"domain\":\"example.org\",\"handle\":\"sam\",\"identityKey\":\"0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c\"},\"signature\":\"3044022053e16a9ab0223faed0e7c2ef163a60f72d63d159cb076034c6a473e85fbcb3390220684e41dbfffbe6606ba601738f7fb3eeed1df9f1fd187352794ba23f200231f2\"}",
+      "signedJson": "{\"created\":\"2026-01-01T00:00:00Z\",\"metanetHandles\":\"1.0\",\"payment\":null,\"recipient\":{\"domain\":\"example.com\",\"handle\":\"robin\",\"identityKey\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"},\"sender\":{\"domain\":\"example.org\",\"handle\":\"sam\",\"identityKey\":\"0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c\"}}",
+      "signedHash": "849d009c4be8e21361aafb2fb6f07dae718d5e3ca1f4852c55957cffa1f2c7f2",
+      "signatureKey": "03919d615c0cfff49de5aacfe1258e8534625602b5fda0e86f301aa046cc9812be",
+      "record": "a90044626265010178196578616d706c655f6f66666963655f717a786b76626d777472025821027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa20070365696e626f780458210324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c051a6955b9000600075903017b22636f6e74656e74223a22516b49514d774d6b5a5436735130534941437a4161372b3338512f68695a486a58352f6b4d43322b707449315063437248414a2f4d65764652697766334f47334e2b7a2f55744e396464366b504f4563644e4a616f70635758366f674236484f4d46495968714e75654e627a4d6b35303630613237366c447669444750743136474b6c42734247435a577374397738697a51324b4a59394f4763414758635734513575663132685938344f4132656e6c4733762f7332526768466c534a4f4f6a30727752744f66666a7a727a776e6145425547714d727563465a4254556f372b43416d33524d64444670326456514d325274596577525a54593735477148785044413d3d222c2263726561746564223a22323032362d30312d30315430303a30303a30305a222c226d6574616e657448616e646c6573223a22312e30222c227061796d656e74223a6e756c6c2c22726563697069656e74223a7b22646f6d61696e223a226578616d706c652e636f6d222c2268616e646c65223a22726f62696e222c226964656e746974794b6579223a22303237663331656263353436326331666463653162373337656366663532643337643735646561343363653131633734643235616132393731363566616132303037227d2c2273656e646572223a7b22646f6d61696e223a226578616d706c652e6f7267222c2268616e646c65223a2273616d222c226964656e746974794b6579223a22303332343635336561633433343438383030326363303662626662376631306665313839393165333566396665343330326462656136643233353364633061623163227d2c227369676e6174757265223a223330343430323230353365313661396162303232336661656430653763326566313633613630663732643633643135396362303736303334633661343733653835666263623333393032323036383465343164626666666265363630366261363031373338663766623365656564316466396631666431383733353237393462613233663230303233316632227d1818782261206b657920746869732076657273696f6e20646f6573206e6f7420646566696e65",
+      "recordLength": 933,
+      "carrierFieldHash": "a5899f7ccd9d108684a3272783cc61a1f5fca7811df0062519cc278cfab68ef3",
+      "extra": [
+        {
+          "key": 24,
+          "valueCbor": "782261206b657920746869732076657273696f6e20646f6573206e6f7420646566696e65"
+        }
+      ]
+    },
+    {
+      "name": "envelope-refs",
+      "note": "an envelope that expires after seven days, to box files; the plaintext references a larger encrypted attachment by digest (refs); the BRC-169 envelope carries a quoteId and a member this contract does not define, both covered by the signature",
+      "office": "example_office_qzxkvbmwtr",
+      "topic": "tm_bbox_example_office_qzxkvbmwtr",
+      "to": "027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007",
+      "box": "files",
+      "from": "0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c",
+      "created": 1767225660,
+      "createdRfc3339": "2026-01-01T00:01:00Z",
+      "expires": 1767830460,
+      "plaintext": "{\"body\":\"The report is attached.\",\"refs\":[{\"key\":\"9838965a716cc0397a8e3f218d8fc2c02f31589e8b62a538aaf9ab7db8ccbe46\",\"length\":48213,\"sha256\":\"c280f97c6f54517097be07b3cab53f3f538183496e728e3549c19f843ee59ed4\",\"url\":\"https://files.example.com/r/c280f97c6f54517097be07b3cab53f3f538183496e728e3549c19f843ee59ed4\"}]}",
+      "brc78KeyId": "ad5c4ea414336548c044db8b1df6ce22b4c38335e41e7c51f9177fdecd9a88e5",
+      "brc78Iv": "459f0b8d2bd6a6d92cb91d2cf699420089f3e32bfc9f0a3e1aacfd9e9b815b03",
+      "brc78": "424210330324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007ad5c4ea414336548c044db8b1df6ce22b4c38335e41e7c51f9177fdecd9a88e5459f0b8d2bd6a6d92cb91d2cf699420089f3e32bfc9f0a3e1aacfd9e9b815b03ee0337ab8bc8db7f230bf9c28792a761c491642413649c7dea4258c98b77dd5d94bb4af24cc61dd3e6e8776d88f0b5c6fb7026559f62fcf0f87d16cf1731f29b9d5bf4c30311b324fceab4b8c56fba56dc6690c86b10fe96d1e803b1cd8cd23aabc94d28b7e3ee30146d3b0f68ef0a4c18b5a9be5fe5ddbc34e75df05c0a6576cbc0fab8b4629644cf3999033b203e5f117d62f62a74f5c580c6190c6860bf7533afdb4496775e3a7dc2157ea1e02fc09ba175cc1939209af6f134b38e1364718951567a47df33e89a403a0f9e63d4c7ca2de4c2662c021203daca0cce247d541421b71415e40ee6b09730a5612f2022d0510e9db539d9fb8cfc968fb0edd1d8d3a4076357d902cfe9b2eecb09cfc026d22111e58d31e5c3f3425311dcd2cde6994be7060c5cb11e3b7e9bc6be81481fa79eb8feb291ea8516091f533b3238e8024428d8c0f6",
+      "content": "{\"content\":\"QkIQMwMkZT6sQ0SIACzAa7+38Q/hiZHjX5/kMC2+ptI1PcCrHAJ/MevFRiwf3OG3N+z/UtN9dd6kPOEcdNJaopcWX6ogB61cTqQUM2VIwETbix32ziK0w4M15B58UfkXf97NmojlRZ8LjSvWptksuR0s9plCAInz4yv8nwo+Gqz9npuBWwPuAzeri8jbfyML+cKHkqdhxJFkJBNknH3qQljJi3fdXZS7SvJMxh3T5uh3bYjwtcb7cCZVn2L88Ph9Fs8XMfKbnVv0wwMRsyT86rS4xW+6VtxmkMhrEP6W0egDsc2M0jqryU0ot+PuMBRtOw9o7wpMGLWpvl/l3bw0513wXApldsvA+ri0YpZEzzmZAzsgPl8RfWL2KnT1xYDGGQxoYL91M6/bRJZ3Xjp9whV+oeAvwJuhdcwZOSCa9vE0s44TZHGJUVZ6R98z6JpAOg+eY9THyi3kwmYsAhID2soMziR9VBQhtxQV5A7msJcwpWEvICLQUQ6dtTnZ+4z8lo+w7dHY06QHY1fZAs/psu7LCc/AJtIhEeWNMeXD80JTEdzSzeaZS+cGDFyxHjt+m8a+gUgfp564/rKR6oUWCR9TOzI46AJEKNjA9g==\",\"created\":\"2026-01-01T00:01:00Z\",\"metanetHandles\":\"1.0\",\"payment\":null,\"quoteId\":\"q-0001\",\"recipient\":{\"identityKey\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"},\"sender\":{\"identityKey\":\"0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c\"},\"signature\":\"3045022100f8c8bcabb6dccf0ccc4e9cc5279cb73311210e078c3f8842fb14f14952f559de02202adf9c362c605315d1dfd4217fb8f62fdf495202da381467c9050436d2dfca99\",\"threadId\":\"t-7\"}",
+      "signedJson": "{\"created\":\"2026-01-01T00:01:00Z\",\"metanetHandles\":\"1.0\",\"payment\":null,\"quoteId\":\"q-0001\",\"recipient\":{\"identityKey\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"},\"sender\":{\"identityKey\":\"0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c\"},\"threadId\":\"t-7\"}",
+      "signedHash": "ec6bf0186e123306d5855ea7b453f960ba5ba75ae8d99d8414740c89e983072f",
+      "signatureKey": "03919d615c0cfff49de5aacfe1258e8534625602b5fda0e86f301aa046cc9812be",
+      "record": "a80044626265010178196578616d706c655f6f66666963655f717a786b76626d777472025821027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007036566696c65730458210324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c051a6955b93c061a695ef3bc0759043d7b22636f6e74656e74223a22516b49514d774d6b5a5436735130534941437a4161372b3338512f68695a486a58352f6b4d43322b707449315063437248414a2f4d65764652697766334f47334e2b7a2f55744e396464366b504f4563644e4a616f70635758366f6742363163547151554d32564977455462697833327a694b3077344d313542353855666b586639374e6d6f6a6c525a384c6a53765770746b737552307339706c4341496e7a347976386e776f2b47717a396e70754257775075417a657269386a6266794d4c2b634b486b716468784a466b4a424e6b6e483371516c6a4a69336664585a533753764a4d786833543575683362596a777463623763435a566e324c3838506839467338584d664b626e56763077774d52737954383672533478572b365674786d6b4d687245503657306567447363324d306a71727955306f742b50754d4252744f77396f3777704d474c5770766c2f6c33627730353133775841706c647376412b72693059705a457a7a6d5a417a7367506c385266574c324b6e5431785944474751786f594c39314d362f62524a5a33586a70397768562b6f654176774a75686463775a4f53436139764530733434545a48474a55565a365239387a364a70414f672b65593954487969336b776d59734168494432736f4d7a69523956425168747851563541376d734a63777057457649434c515551366474546e5a2b347a386c6f2b7737644859303651485931665a41732f707375374c43632f414a7449684565574e4d65584438304a5445647a537a65615a532b634744467978486a742b6d38612b67556766703536342f724b52366f5557435239544f7a493436414a454b4e6a4139673d3d222c2263726561746564223a22323032362d30312d30315430303a30313a30305a222c226d6574616e657448616e646c6573223a22312e30222c227061796d656e74223a6e756c6c2c2271756f74654964223a22712d30303031222c22726563697069656e74223a7b226964656e746974794b6579223a22303237663331656263353436326331666463653162373337656366663532643337643735646561343363653131633734643235616132393731363566616132303037227d2c2273656e646572223a7b226964656e746974794b6579223a22303332343635336561633433343438383030326363303662626662376631306665313839393165333566396665343330326462656136643233353364633061623163227d2c227369676e6174757265223a2233303435303232313030663863386263616262366463636630636363346539636335323739636237333331313231306530373863336638383432666231346631343935326635353964653032323032616466396333363263363035333135643164666434323137666238663632666466343935323032646133383134363763393035303433366432646663613939222c227468726561644964223a22742d37227d",
+      "recordLength": 1215,
+      "carrierFieldHash": "adbef37fbe169ae019eabdcf302c38b0a6d6e613825557b06ce871d1625f9561"
+    },
+    {
+      "name": "envelope-64-keys",
+      "note": "the record has 64 keys, the most a record may have: 0 to 7 and unknown keys 8 to 63, which a reader preserves and ignores",
+      "office": "example_office_qzxkvbmwtr",
+      "topic": "tm_bbox_example_office_qzxkvbmwtr",
+      "to": "027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007",
+      "box": "inbox",
+      "from": "0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c",
+      "created": 1767225720,
+      "createdRfc3339": "2026-01-01T00:02:00Z",
+      "expires": 0,
+      "plaintext": "{\"body\":\"ok\"}",
+      "brc78KeyId": "026c53d986972aa44c31f94d827e85009bb25c039edc818afa50cdeb6ff041ff",
+      "brc78Iv": "0f87ae550efa3dafa31cd935fc10e685aa97333bdf79113603eb8aab26206e26",
+      "brc78": "424210330324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007026c53d986972aa44c31f94d827e85009bb25c039edc818afa50cdeb6ff041ff0f87ae550efa3dafa31cd935fc10e685aa97333bdf79113603eb8aab26206e26c010bbb01f860c498c863b6f2e725bb3242b09a1f8489d5de4de6a740c",
+      "content": "{\"content\":\"QkIQMwMkZT6sQ0SIACzAa7+38Q/hiZHjX5/kMC2+ptI1PcCrHAJ/MevFRiwf3OG3N+z/UtN9dd6kPOEcdNJaopcWX6ogBwJsU9mGlyqkTDH5TYJ+hQCbslwDntyBivpQzetv8EH/D4euVQ76Pa+jHNk1/BDmhaqXMzvfeRE2A+uKqyYgbibAELuwH4YMSYyGO28ucluzJCsJofhInV3k3mp0DA==\",\"created\":\"2026-01-01T00:02:00Z\",\"metanetHandles\":\"1.0\",\"payment\":null,\"recipient\":{\"identityKey\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"},\"sender\":{\"identityKey\":\"0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c\"},\"signature\":\"3044022017fd32b4c23de4493100a1eb8bf2b6a82c5e19c11dc423e14f8b0468692c42e102206ced06b4ff69e85d2ade015ef5606c6e79c0e14058d8814b3f08a8f6c72d6721\"}",
+      "signedJson": "{\"created\":\"2026-01-01T00:02:00Z\",\"metanetHandles\":\"1.0\",\"payment\":null,\"recipient\":{\"identityKey\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"},\"sender\":{\"identityKey\":\"0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c\"}}",
+      "signedHash": "ac2583f73b9f73554fad213c4952ed189c1405eda35b04010f3bd5161647737e",
+      "signatureKey": "03919d615c0cfff49de5aacfe1258e8534625602b5fda0e86f301aa046cc9812be",
+      "record": "b8400044626265010178196578616d706c655f6f66666963655f717a786b76626d777472025821027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa20070365696e626f780458210324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c051a6955b97806000759028b7b22636f6e74656e74223a22516b49514d774d6b5a5436735130534941437a4161372b3338512f68695a486a58352f6b4d43322b707449315063437248414a2f4d65764652697766334f47334e2b7a2f55744e396464366b504f4563644e4a616f70635758366f6742774a7355396d476c79716b5444483554594a2b68514362736c77446e747942697670517a6574763845482f443465755651373650612b6a484e6b312f42446d686171584d7a766665524532412b754b7179596762696241454c75774834594d535979474f323875636c757a4a43734a6f6668496e56336b336d703044413d3d222c2263726561746564223a22323032362d30312d30315430303a30323a30305a222c226d6574616e657448616e646c6573223a22312e30222c227061796d656e74223a6e756c6c2c22726563697069656e74223a7b226964656e746974794b6579223a22303237663331656263353436326331666463653162373337656366663532643337643735646561343363653131633734643235616132393731363566616132303037227d2c2273656e646572223a7b226964656e746974794b6579223a22303332343635336561633433343438383030326363303662626662376631306665313839393165333566396665343330326462656136643233353364633061623163227d2c227369676e6174757265223a223330343430323230313766643332623463323364653434393331303061316562386266326236613832633565313963313164633432336531346638623034363836393263343265313032323036636564303662346666363965383564326164653031356566353630366336653739633065313430353864383831346233663038613866366337326436373231227d080809090a0a0b0b0c0c0d0d0e0e0f0f101011111212131314141515161617171818181818191819181a181a181b181b181c181c181d181d181e181e181f181f18201820182118211822182218231823182418241825182518261826182718271828182818291829182a182a182b182b182c182c182d182d182e182e182f182f18301830183118311832183218331833183418341835183518361836183718371838183818391839183a183a183b183b183c183c183d183d183e183e183f183f",
+      "recordLength": 970,
+      "carrierFieldHash": "e7e3341a141ae8ce8b53f8192e5e7eb848df9f95f3836b7a38bb10f4b33444a0",
+      "extra": [
+        {
+          "key": 8,
+          "valueCbor": "08"
+        },
+        {
+          "key": 9,
+          "valueCbor": "09"
+        },
+        {
+          "key": 10,
+          "valueCbor": "0a"
+        },
+        {
+          "key": 11,
+          "valueCbor": "0b"
+        },
+        {
+          "key": 12,
+          "valueCbor": "0c"
+        },
+        {
+          "key": 13,
+          "valueCbor": "0d"
+        },
+        {
+          "key": 14,
+          "valueCbor": "0e"
+        },
+        {
+          "key": 15,
+          "valueCbor": "0f"
+        },
+        {
+          "key": 16,
+          "valueCbor": "10"
+        },
+        {
+          "key": 17,
+          "valueCbor": "11"
+        },
+        {
+          "key": 18,
+          "valueCbor": "12"
+        },
+        {
+          "key": 19,
+          "valueCbor": "13"
+        },
+        {
+          "key": 20,
+          "valueCbor": "14"
+        },
+        {
+          "key": 21,
+          "valueCbor": "15"
+        },
+        {
+          "key": 22,
+          "valueCbor": "16"
+        },
+        {
+          "key": 23,
+          "valueCbor": "17"
+        },
+        {
+          "key": 24,
+          "valueCbor": "1818"
+        },
+        {
+          "key": 25,
+          "valueCbor": "1819"
+        },
+        {
+          "key": 26,
+          "valueCbor": "181a"
+        },
+        {
+          "key": 27,
+          "valueCbor": "181b"
+        },
+        {
+          "key": 28,
+          "valueCbor": "181c"
+        },
+        {
+          "key": 29,
+          "valueCbor": "181d"
+        },
+        {
+          "key": 30,
+          "valueCbor": "181e"
+        },
+        {
+          "key": 31,
+          "valueCbor": "181f"
+        },
+        {
+          "key": 32,
+          "valueCbor": "1820"
+        },
+        {
+          "key": 33,
+          "valueCbor": "1821"
+        },
+        {
+          "key": 34,
+          "valueCbor": "1822"
+        },
+        {
+          "key": 35,
+          "valueCbor": "1823"
+        },
+        {
+          "key": 36,
+          "valueCbor": "1824"
+        },
+        {
+          "key": 37,
+          "valueCbor": "1825"
+        },
+        {
+          "key": 38,
+          "valueCbor": "1826"
+        },
+        {
+          "key": 39,
+          "valueCbor": "1827"
+        },
+        {
+          "key": 40,
+          "valueCbor": "1828"
+        },
+        {
+          "key": 41,
+          "valueCbor": "1829"
+        },
+        {
+          "key": 42,
+          "valueCbor": "182a"
+        },
+        {
+          "key": 43,
+          "valueCbor": "182b"
+        },
+        {
+          "key": 44,
+          "valueCbor": "182c"
+        },
+        {
+          "key": 45,
+          "valueCbor": "182d"
+        },
+        {
+          "key": 46,
+          "valueCbor": "182e"
+        },
+        {
+          "key": 47,
+          "valueCbor": "182f"
+        },
+        {
+          "key": 48,
+          "valueCbor": "1830"
+        },
+        {
+          "key": 49,
+          "valueCbor": "1831"
+        },
+        {
+          "key": 50,
+          "valueCbor": "1832"
+        },
+        {
+          "key": 51,
+          "valueCbor": "1833"
+        },
+        {
+          "key": 52,
+          "valueCbor": "1834"
+        },
+        {
+          "key": 53,
+          "valueCbor": "1835"
+        },
+        {
+          "key": 54,
+          "valueCbor": "1836"
+        },
+        {
+          "key": 55,
+          "valueCbor": "1837"
+        },
+        {
+          "key": 56,
+          "valueCbor": "1838"
+        },
+        {
+          "key": 57,
+          "valueCbor": "1839"
+        },
+        {
+          "key": 58,
+          "valueCbor": "183a"
+        },
+        {
+          "key": 59,
+          "valueCbor": "183b"
+        },
+        {
+          "key": 60,
+          "valueCbor": "183c"
+        },
+        {
+          "key": 61,
+          "valueCbor": "183d"
+        },
+        {
+          "key": 62,
+          "valueCbor": "183e"
+        },
+        {
+          "key": 63,
+          "valueCbor": "183f"
+        }
+      ]
+    }
+  ]
+}

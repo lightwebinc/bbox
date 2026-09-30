@@ -1,0 +1,236 @@
+{
+  "cases": [
+    {
+      "name": "max-integer",
+      "note": "2^53 - 1",
+      "input": "{\"a\":9007199254740991}",
+      "inputHex": "7b2261223a393030373139393235343734303939317d",
+      "accepted": true,
+      "canonical": "{\"a\":9007199254740991}",
+      "isCanonical": true
+    },
+    {
+      "name": "min-integer",
+      "note": "-(2^53 - 1)",
+      "input": "{\"a\":-9007199254740991}",
+      "inputHex": "7b2261223a2d393030373139393235343734303939317d",
+      "accepted": true,
+      "canonical": "{\"a\":-9007199254740991}",
+      "isCanonical": true
+    },
+    {
+      "name": "integer-2-53",
+      "note": "2^53 is not exact as a double in every parser's hands: refused",
+      "input": "{\"a\":9007199254740992}",
+      "inputHex": "7b2261223a393030373139393235343734303939327d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "integer-minus-2-53",
+      "input": "{\"a\":-9007199254740992}",
+      "inputHex": "7b2261223a2d393030373139393235343734303939327d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "exponent",
+      "note": "an exponent, even one a double holds exactly",
+      "input": "{\"a\":1e+21}",
+      "inputHex": "7b2261223a31652b32317d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "fraction",
+      "input": "{\"a\":1.5}",
+      "inputHex": "7b2261223a312e357d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "fraction-zero",
+      "note": "an integer value written with a fraction",
+      "input": "{\"a\":1.0}",
+      "inputHex": "7b2261223a312e307d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "minus-zero",
+      "input": "{\"a\":-0}",
+      "inputHex": "7b2261223a2d307d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "leading-zero",
+      "input": "{\"a\":01}",
+      "inputHex": "7b2261223a30317d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "lone-high-surrogate",
+      "input": "{\"a\":\"\\ud800\"}",
+      "inputHex": "7b2261223a225c7564383030227d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "lone-low-surrogate",
+      "input": "{\"a\":\"\\udc00\"}",
+      "inputHex": "7b2261223a225c7564633030227d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "lone-surrogate-in-name",
+      "note": "names are strings too",
+      "input": "{\"\\udc00\":1}",
+      "inputHex": "7b225c7564633030223a317d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "surrogate-pair",
+      "note": "a pair is one code point, written raw in the canonical form",
+      "input": "{\"a\":\"\\ud83d\\ude00\"}",
+      "inputHex": "7b2261223a225c75643833645c7564653030227d",
+      "accepted": true,
+      "canonical": "{\"a\":\"😀\"}",
+      "isCanonical": false
+    },
+    {
+      "name": "duplicate-name",
+      "input": "{\"a\":1,\"a\":1}",
+      "inputHex": "7b2261223a312c2261223a317d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "byte-order-mark",
+      "input": "﻿{}",
+      "inputHex": "efbbbf7b7d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "invalid-utf8",
+      "input": "{\"a\":\"�\"}",
+      "inputHex": "7b2261223a22ff227d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "raw-control",
+      "note": "a raw control character inside a string",
+      "input": "{\"a\":\"\u0001\"}",
+      "inputHex": "7b2261223a2201227d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "escaped-control",
+      "note": "the canonical form writes \\u001f in lowercase hex",
+      "input": "{\"a\":\"\\u001F\"}",
+      "inputHex": "7b2261223a225c7530303146227d",
+      "accepted": true,
+      "canonical": "{\"a\":\"\\u001f\"}",
+      "isCanonical": false
+    },
+    {
+      "name": "escaped-letter",
+      "note": "parses; the canonical form writes the letter itself",
+      "input": "{\"a\":\"\\u0041\"}",
+      "inputHex": "7b2261223a225c7530303431227d",
+      "accepted": true,
+      "canonical": "{\"a\":\"A\"}",
+      "isCanonical": false
+    },
+    {
+      "name": "line-separator",
+      "note": "U+2028 is written raw, as JSON.stringify writes it",
+      "input": "{\"a\":\"\u2028\"}",
+      "inputHex": "7b2261223a22e280a8227d",
+      "accepted": true,
+      "canonical": "{\"a\":\"\u2028\"}",
+      "isCanonical": true
+    },
+    {
+      "name": "solidus",
+      "note": "\\/ parses as / and is written unescaped",
+      "input": "{\"a\":\"\\/\"}",
+      "inputHex": "7b2261223a225c2f227d",
+      "accepted": true,
+      "canonical": "{\"a\":\"/\"}",
+      "isCanonical": false
+    },
+    {
+      "name": "utf16-order",
+      "note": "names sort by UTF-16 code units: U+1F600 (D83D DE00) before U+FF61, the reverse of their UTF-8 byte order",
+      "input": "{\"｡\":1,\"😀\":2}",
+      "inputHex": "7b22efbda1223a312c22f09f9880223a327d",
+      "accepted": true,
+      "canonical": "{\"😀\":2,\"｡\":1}",
+      "isCanonical": false
+    },
+    {
+      "name": "white-space",
+      "input": "{ \"b\" : [ 1 , true , null ] , \"a\" : \"x\" }",
+      "inputHex": "7b20226222203a205b2031202c2074727565202c206e756c6c205d202c20226122203a20227822207d",
+      "accepted": true,
+      "canonical": "{\"a\":\"x\",\"b\":[1,true,null]}",
+      "isCanonical": false
+    },
+    {
+      "name": "depth-16",
+      "note": "sixteen nested arrays: the top level counts as one",
+      "input": "[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]",
+      "inputHex": "5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d",
+      "accepted": true,
+      "canonical": "[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]",
+      "isCanonical": true
+    },
+    {
+      "name": "depth-17",
+      "input": "[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]",
+      "inputHex": "5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "object-depth-16",
+      "note": "sixteen nested objects, the top-level object being depth 1: the deepest content allowed",
+      "input": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{}}}}}}}}}}}}}}}}",
+      "inputHex": "7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d",
+      "accepted": true,
+      "canonical": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{}}}}}}}}}}}}}}}}",
+      "isCanonical": true
+    },
+    {
+      "name": "object-depth-17",
+      "input": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{}}}}}}}}}}}}}}}}}",
+      "inputHex": "7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b2261223a7b7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "trailing",
+      "input": "{} x",
+      "inputHex": "7b7d2078",
+      "accepted": false,
+      "isCanonical": false
+    },
+    {
+      "name": "proto-name",
+      "note": "a name some JavaScript objects treat specially is an ordinary name",
+      "input": "{\"__proto__\":1}",
+      "inputHex": "7b225f5f70726f746f5f5f223a317d",
+      "accepted": true,
+      "canonical": "{\"__proto__\":1}",
+      "isCanonical": true
+    }
+  ],
+  "description": "The JSON subset of docs/spec.md section 4.1, case by case: whether a value is in the subset, its RFC 8785 serialization, and whether the input is already that serialization. An envelope's content is admitted only when it is accepted and canonical. inputHex holds the exact input bytes (input is the same as a string, and cannot carry invalid UTF-8); JSON escapes in them are part of the input."
+}

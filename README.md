@@ -1,0 +1,50 @@
+# bbox
+
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
+A message box on Bitcoin, replicated by overlay hosts. A sender addresses an
+encrypted envelope to a recipient's identity key and a box; every host that
+carries the office holds it; the recipient lists its box from any host,
+verifies every envelope against block headers it checks itself, and
+acknowledges with a signed receipt that every host applies. A payment can
+travel inside an envelope, unbroadcast, for the recipient to internalize.
+
+## How it works
+
+- **Envelopes are never mined.** Each rides an unmined carrier transaction
+  that spends one output of the sender's mined funding tree, so it verifies
+  by SPV, it is bound to the sender's key, and the sender can retract it by
+  spending that output.
+- **Hosts are replicas, not authorities.** A host can withhold an envelope; it
+  cannot forge or alter one. Reading from several hosts shows a host that
+  withholds.
+- **Content is a BRC-169 envelope**, encrypted to the recipient under BRC-78.
+  Who wrote to whom, and when, is public; what was written is not.
+- **Two ways to reach the hosts.** On the multicast plane a publisher submits
+  each object once and every subscribed host receives it; without it, the
+  publisher submits to each host itself.
+- **Reading is free.** The base questions are free on every conforming host;
+  a host may charge for history, never for the inbox.
+
+## Documentation
+
+| If you want to | Read |
+| --- | --- |
+| Implement a compatible sender, reader or host | [docs/spec.md](docs/spec.md) (the specification) |
+| Know what cannot change once published | [docs/frozen.md](docs/frozen.md) |
+| Know the defaults and caps, and why each is set where it is | [docs/limits.md](docs/limits.md) |
+
+## Build and test
+
+```console
+$ GOWORK=off go vet ./...
+$ GOWORK=off go test -race -count=2 ./...
+$ GOWORK=off go run ./cmd/vectors -check
+```
+
+Go 1.27.1 or later. The golden vectors in `testdata/vectors` are generated
+by `GOWORK=off go run ./cmd/vectors` and checked byte for byte by the tests.
+
+## License
+
+Apache 2.0; see [LICENSE](LICENSE).

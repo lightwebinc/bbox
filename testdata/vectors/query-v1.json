@@ -1,0 +1,297 @@
+{
+  "classes": [
+    {
+      "class": "inbox",
+      "free": true,
+      "members": [
+        "office",
+        "to"
+      ],
+      "page": 64
+    },
+    {
+      "class": "inbox-after",
+      "free": true,
+      "members": [
+        "after",
+        "office",
+        "to"
+      ],
+      "page": 64
+    },
+    {
+      "class": "box",
+      "free": true,
+      "members": [
+        "box",
+        "office",
+        "to"
+      ],
+      "page": 64
+    },
+    {
+      "class": "box-after",
+      "free": true,
+      "members": [
+        "after",
+        "box",
+        "office",
+        "to"
+      ],
+      "page": 64
+    },
+    {
+      "class": "sender",
+      "free": true,
+      "members": [
+        "from",
+        "office",
+        "to"
+      ],
+      "page": 64
+    },
+    {
+      "class": "sender-after",
+      "free": true,
+      "members": [
+        "after",
+        "from",
+        "office",
+        "to"
+      ],
+      "page": 64
+    },
+    {
+      "class": "receipt",
+      "free": true,
+      "members": [
+        "by",
+        "office",
+        "receiptFor"
+      ],
+      "page": 8
+    },
+    {
+      "class": "sweep",
+      "free": true,
+      "members": [
+        "office",
+        "spent"
+      ],
+      "page": 8
+    },
+    {
+      "class": "history",
+      "free": false,
+      "members": [
+        "history",
+        "office"
+      ],
+      "page": 64
+    },
+    {
+      "class": "history-after",
+      "free": false,
+      "members": [
+        "after",
+        "history",
+        "office"
+      ],
+      "page": 64
+    }
+  ],
+  "description": "ls_bbox questions (docs/spec.md section 7.2): the query member of a BRC-24 lookup, as JSON text. Each is either a class, with whether it is free on every conforming host and the most outputs one answer holds, or refused. Txids in questions are display order.",
+  "questions": [
+    {
+      "name": "inbox",
+      "note": "every unacknowledged envelope to a key, all boxes",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"}",
+      "class": "inbox",
+      "free": true,
+      "page": 64
+    },
+    {
+      "name": "inbox-after",
+      "note": "the next page after a cursor",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"after\":\"1767225600:87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021\"}",
+      "class": "inbox-after",
+      "free": true,
+      "page": 64
+    },
+    {
+      "name": "box",
+      "note": "one box",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"box\":\"inbox\"}",
+      "class": "box",
+      "free": true,
+      "page": 64
+    },
+    {
+      "name": "box-after",
+      "note": "one box, the next page",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"box\":\"inbox\",\"after\":\"1767225600:87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021\"}",
+      "class": "box-after",
+      "free": true,
+      "page": 64
+    },
+    {
+      "name": "box-since",
+      "note": "a cursor of a time and 64 zeros asks for everything created at or after that second",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"box\":\"inbox\",\"after\":\"1767225600:0000000000000000000000000000000000000000000000000000000000000000\"}",
+      "class": "box-after",
+      "free": true,
+      "page": 64
+    },
+    {
+      "name": "sender",
+      "note": "the open envelopes to a key from one sender, all boxes",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"from\":\"0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c\"}",
+      "class": "sender",
+      "free": true,
+      "page": 64
+    },
+    {
+      "name": "sender-after",
+      "note": "the same, the next page",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"from\":\"0324653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c\",\"after\":\"1767225600:87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021\"}",
+      "class": "sender-after",
+      "free": true,
+      "page": 64
+    },
+    {
+      "name": "sweep",
+      "note": "the admitted sweeps that spend one outpoint",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"spent\":\"87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021.0\"}",
+      "class": "sweep",
+      "free": true,
+      "page": 8
+    },
+    {
+      "name": "receipt",
+      "note": "the receipts by a recipient that acknowledge one envelope",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"by\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"receiptFor\":\"87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021\"}",
+      "class": "receipt",
+      "free": true,
+      "page": 8
+    },
+    {
+      "name": "history",
+      "note": "priceable: acknowledged or expired envelopes the host still keeps",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"history\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"}",
+      "class": "history",
+      "free": false,
+      "page": 64
+    },
+    {
+      "name": "history-after",
+      "note": "priceable, the next page",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"history\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"after\":\"1767225600:87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021\"}",
+      "class": "history-after",
+      "free": false,
+      "page": 64
+    },
+    {
+      "name": "repeated-member",
+      "note": "a member given twice takes its last value, as JSON parsers do",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"not a key\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"}",
+      "class": "inbox",
+      "free": true,
+      "page": 64
+    },
+    {
+      "name": "extra-member",
+      "note": "an unknown member is refused, never ignored: ignoring it would let any word make a priced alias of a free class",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"fast\":\"yes\"}",
+      "refused": "query"
+    },
+    {
+      "name": "priced-superset",
+      "note": "a free class plus a priced member is no class",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"history\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"}",
+      "refused": "query"
+    },
+    {
+      "name": "no-office",
+      "note": "every class names its office",
+      "question": "{\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"}",
+      "refused": "query"
+    },
+    {
+      "name": "empty",
+      "question": "{}",
+      "refused": "query"
+    },
+    {
+      "name": "readable-part-only",
+      "note": "the readable part alone never names an office",
+      "question": "{\"office\":\"example_office\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"}",
+      "refused": "query"
+    },
+    {
+      "name": "office-uppercase",
+      "question": "{\"office\":\"example_office_QZXKVBMWTR\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"}",
+      "refused": "query"
+    },
+    {
+      "name": "to-uppercase",
+      "note": "keys are lowercase hex",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027F31EBC5462C1FDCE1B737ECFF52D37D75DEA43CE11C74D25AA297165FAA2007\"}",
+      "refused": "query"
+    },
+    {
+      "name": "to-alias",
+      "note": "02 || p + 1 is an alias of the point with x = 1, which some parsers accept",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"02fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc30\"}",
+      "refused": "query"
+    },
+    {
+      "name": "to-number",
+      "note": "every member is a string",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":7}",
+      "refused": "query"
+    },
+    {
+      "name": "box-leading-digit",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"box\":\"1inbox\"}",
+      "refused": "query"
+    },
+    {
+      "name": "after-leading-zero",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"after\":\"01767225600:87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021\"}",
+      "refused": "query"
+    },
+    {
+      "name": "after-no-txid",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"after\":\"1767225600\"}",
+      "refused": "query"
+    },
+    {
+      "name": "after-beyond-9999",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"after\":\"253402300800:87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021\"}",
+      "refused": "query"
+    },
+    {
+      "name": "sweep-leading-zero",
+      "note": "an output index is decimal with no leading zero",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"spent\":\"87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021.01\"}",
+      "refused": "query"
+    },
+    {
+      "name": "sweep-colon",
+      "note": "an outpoint is txid.vout",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"spent\":\"87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021:0\"}",
+      "refused": "query"
+    },
+    {
+      "name": "sweep-plus-to",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"spent\":\"87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f2333021.0\",\"to\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\"}",
+      "refused": "query"
+    },
+    {
+      "name": "receipt-short-txid",
+      "question": "{\"office\":\"example_office_qzxkvbmwtr\",\"by\":\"027f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007\",\"receiptFor\":\"87af14c55263c533e09f8c256f0fd15c3f5ff54895a1a1113e299bc0f233302\"}",
+      "refused": "query"
+    }
+  ],
+  "service": "ls_bbox"
+}
