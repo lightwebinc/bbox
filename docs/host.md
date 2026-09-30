@@ -24,6 +24,15 @@ BBOX_OFFICES=example_office_qzxkvbmwtr
 BBOX_STATE_DIR=/var/lib/bbox
 ```
 
+Or build the host image, a reference overlay host image with the module
+built in (`host/Dockerfile`): its entrypoint requires `BBOX_OFFICES`,
+derives `OVERLAY_TOPICS` from it when unset, and keeps the state directory
+at `/var/lib/bbox`, where a volume belongs.
+
+```console
+$ make docker-build-host REFERENCE_HOST_IMAGE=<reference overlay host image>
+```
+
 The host must run with no broadcaster: a carrier is a record, never a
 transaction for the chain (spec section 8.1). The reference host has none.
 
@@ -39,6 +48,8 @@ transaction for the chain (spec section 8.1). The reference host has none.
 | `BBOX_PRICES` | none | the classes this host prices, for example `history=5,history-after=5`. Only the priceable classes; a price of 0 charges nothing |
 | `BBOX_PAYEE_KEY` | none | the payee's private key, 64 lowercase hex characters: the terms route's BRC-104 identity and the key payments are derived from |
 | `BBOX_HEADERS_URL` | `OVERLAY_CHAIN_TRACKER_URL` | the header source payments are verified against, in the reference host's `/v1` shape |
+| `BBOX_SESSIONS` | 10000 | the most BRC-104 sessions the terms route keeps. Past it the least recently used is forgotten |
+| `BBOX_SESSION_TTL` | 600 | seconds a BRC-104 session is kept once idle (not used for a request) |
 
 A price needs `BBOX_LISTEN`, `BBOX_PAYEE_KEY` and a header source. Any
 mistake stops the host before its port opens.
@@ -53,11 +64,8 @@ mistake stops the host before its port opens.
   line is flushed to disk before the admission it records completes.
 - `payments.jsonl` holds every payment the terms route accepted: the Atomic
   BEEF, the derivation prefix and suffix, the sender's identity key, the
-  satoshis and the class. The route answers once the line is on disk; the
-  operator's wallet takes each payment with BRC-100 `internalizeAction`
-  (protocol `wallet payment`, output 0, the remittance as written), which
-  also broadcasts it. Until then a payer can still spend the coins
-  elsewhere, so an operator settles promptly.
+  satoshis and the class. The route answers once the line is on disk. It
+  does not broadcast the payment: see [Settling payments](#settling-payments).
 
 ## The terms route
 
@@ -83,6 +91,54 @@ the prefix, the suffix and the asker, the prefix is one this route issued,
 the payment verifies against the host's headers, and its txid was never used
 before. One payment buys one question. The same class asked on the host's
 own `/lookup` is refused with an error that names this route.
+
+### The session bound
+
+A BRC-104 handshake is unauthenticated, and the SDK's own session store
+keeps every session for the life of the process, so the route keeps its
+own, bounded: at most `BBOX_SESSIONS` sessions, each forgotten once idle
+for `BBOX_SESSION_TTL` seconds, and past the cap the least recently used is
+forgotten first. A client whose session was forgotten is refused and shakes
+hands again; the SDK's client does that by itself. A flood of handshakes
+therefore costs a host a bounded store and makes honest clients shake hands
+again, never unbounded memory. `bbox_sessions` is the store's size and
+`bbox_sessions_evicted_total{why="cap"|"idle"}` what it forgot.
+
+## Settling payments
+
+A payment the terms route accepts is a BRC-29 output to a key derived from
+`BBOX_PAYEE_KEY`, verified against the host's headers and recorded in
+`payments.jsonl` before the question is answered. The host never broadcasts
+it. **Until it is settled, the payer can still spend the same coins
+elsewhere, and the payment is then worth nothing**: a payment is money only
+once it is broadcast and mined. Settle promptly and on a schedule.
+
+Settling is the payee wallet's `internalizeAction` (BRC-100, protocol
+`wallet payment`, output 0, the remittance as written), which broadcasts
+the payment and takes its output. The bbox command does it with a home
+whose identity is the payee:
+
+```console
+$ bbox -home /srv/payee init                          # once: the payee's wallet
+$ bbox -home /srv/payee payee key -out /etc/bbox/payee.env
+$ # BBOX_PAYEE_KEY from payee.env goes into the host's environment
+$ bbox -home /srv/payee payee settle /var/lib/bbox/payments.jsonl
+settled 7c1e...: 5 sat for history from 03a1b2c3d4e5
+1 payment(s) settled, 5 sat; 0 settled before; 0 not settled; pool 1 output(s), 5 sat
+```
+
+`payee key` writes the home's identity key as `BBOX_PAYEE_KEY=<hex>` to a
+new file at mode 0600. `payee settle` reads the ledger (the host writes it;
+the command only reads it), and for each payment the home has not settled
+checks that output 0 pays the key the home derives for the prefix, the
+suffix and the payer, verifies it against the home's headers, broadcasts it
+through the home's settlement leg, waits for its proof, adds it to the
+home's pool, and records its txid in the home as settled. It needs the
+home's `header_url`, `asset` and `settle` ([usage.md](usage.md)). A payment
+the network refuses, because the payer spent its inputs elsewhere, is
+reported, left unsettled, and makes the command exit 1. Running it again is
+safe: what is settled is skipped, and the pool refuses an outpoint twice.
+A BRC-100 wallet holding the payee key can settle the same lines itself.
 
 ## Retention and restore
 
@@ -114,6 +170,8 @@ changes nothing.
 | `bbox_retractions_total` | | outpoints recorded as swept |
 | `bbox_lookups_total` | `class` | questions answered |
 | `bbox_payments_total` | `result` | `requested` (a 402), `accepted`, `refused`, `replayed` |
+| `bbox_sessions` | | BRC-104 sessions the terms route keeps |
+| `bbox_sessions_evicted_total` | `why` | sessions forgotten: `cap`, `idle` |
 | `bbox_offices`, `bbox_envelopes`, `bbox_receipts`, `bbox_sweeps`, `bbox_outpoint_rows` | | gauges of what the index holds |
 
 The engine checks a submission's scripts and proofs before any topic
@@ -130,4 +188,6 @@ the SDK's own BRC-104 client paying its 402, and restore from the engine's
 storage in any order. `make e2e REFERENCE_HOST=<dir>` runs the bundle on a
 local reference host with a throwaway MySQL in Docker, through submit,
 lookup, a receipt, a sweep, a paid question, a restart and the restored
-index.
+index. `make e2e-client REFERENCE_HOST=<dir>` runs the `bbox` command
+against two such hosts (docs/usage.md), and `make quickstart-check` runs
+QUICKSTART.md against the images.

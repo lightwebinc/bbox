@@ -30,6 +30,8 @@ travel inside an envelope, unbroadcast, for the recipient to internalize.
 
 | If you want to | Read |
 | --- | --- |
+| Try it on one machine in minutes, with no coin | [QUICKSTART.md](QUICKSTART.md) |
+| Send, read, acknowledge, pay and be paid with the `bbox` command | [docs/usage.md](docs/usage.md) |
 | Implement a compatible sender, reader or host | [docs/spec.md](docs/spec.md) (the specification) |
 | Know what cannot change once published | [docs/frozen.md](docs/frozen.md) |
 | Know the defaults and caps, and why each is set where it is | [docs/limits.md](docs/limits.md) |
@@ -42,7 +44,9 @@ $ (cd host && npm ci)   # once
 $ make verify           # gofmt, vet, dependency set, typecheck, vectors, tests
 $ make vectors          # regenerate both vector sets
 $ make module           # the host module, host/bundle/bbox-module.js
-$ make e2e REFERENCE_HOST=/path/to/reference-host   # needs Docker
+$ make bbox             # the command, bin/bbox
+$ make e2e REFERENCE_HOST=/path/to/reference-host          # the module; needs Docker
+$ make e2e-client REFERENCE_HOST=/path/to/reference-host   # the command on two hosts
 ```
 
 Go 1.27.1 or later and Node 24; `NODE=/path/to/node` selects a Node 24

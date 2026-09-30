@@ -30,6 +30,9 @@ goes on.
 | Host retention of envelopes | until they leave the answer window | host policy | The window is 30 days (spec section 8.3); the `history` classes are what longer retention sells | Same |
 | Host retention of receipts | 31 days after the later of created and first sight | at least that (spec section 8.4) | A receipt must outlive every envelope it names | Same |
 | Lookup rate a host accepts | host policy | host policy; answers 429 with `Retry-After` | Resolution and lookup are an unauthenticated surface | Same |
+| References per message (`-ref`) | none | 32 (the plaintext bound) | A reference is a locator, a digest and a length, about 250 bytes with a key | Same |
+| Price the client pays for one priced question | none | 1000 sat unless `-max-sats` says more | A price is per question (one page), and a host that asks more than this is asked by the user, never paid by default | Same |
+| BRC-104 sessions a host's terms route keeps | 10000, each forgotten after 600 s idle | host policy (`BBOX_SESSIONS`, `BBOX_SESSION_TTL`) | A handshake is unauthenticated: the store must not grow without end. Past the cap the least recently used goes and its client shakes hands again | Same |
 
 ## Where the numbers come from
 
