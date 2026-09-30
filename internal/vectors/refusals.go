@@ -186,10 +186,13 @@ func resign(o *boxrec.Object) {
 	o.Set(boxrec.MemberSignature, sigOver(derivedPriv(SenderKey, boxrec.SignatureDerivation), signed))
 }
 
-func refusals(built []*sealed) (map[string]any, error) {
+// refusals returns the refusal vectors, and each record by name for the
+// transaction vectors that carry one.
+func refusals(built []*sealed) (map[string]any, map[string][]byte, error) {
 	base := built[0]
 	ef := envelopeFields(base.env)
 	var out []refusalJSON
+	records := map[string][]byte{}
 
 	addEnv := func(name, note string, rec []byte, want string) error {
 		j := refusalJSON{Name: name, Kind: "envelope", Note: note, Record: h(rec), AtAdmission: "refuse"}
@@ -210,6 +213,7 @@ func refusals(built []*sealed) (map[string]any, error) {
 			return fmt.Errorf("%s: refused %q (%v), want %q", name, j.Reason, err, want)
 		}
 		out = append(out, j)
+		records[name] = rec
 		return nil
 	}
 	record := []struct {
@@ -256,7 +260,7 @@ func refusals(built []*sealed) (map[string]any, error) {
 	}
 	for _, r := range record {
 		if err := addEnv(r.name, r.note, r.rec, r.want); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -272,7 +276,7 @@ func refusals(built []*sealed) (map[string]any, error) {
 	canon := string(base.env.Content)
 	selfCipher, err := BRC78([]byte(plainNote), SenderKey, SenderKey, base.keyID, base.iv)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	signed := mustCanon(base.doc.Without(boxrec.MemberContent, boxrec.MemberSignature))
 	content := []struct {
@@ -326,7 +330,7 @@ func refusals(built []*sealed) (map[string]any, error) {
 	}
 	for _, c := range content {
 		if err := addEnv(c.name, c.note, c.rec, c.want); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -360,17 +364,17 @@ func refusals(built []*sealed) (map[string]any, error) {
 		}
 		_, err := boxrec.DecodeReceipt(c.rec)
 		if err == nil {
-			return nil, fmt.Errorf("%s: not refused", c.name)
+			return nil, nil, fmt.Errorf("%s: not refused", c.name)
 		}
 		if j.Reason = boxrec.Reason(err); j.Reason != c.want {
-			return nil, fmt.Errorf("%s: refused %q (%v), want %q", c.name, j.Reason, err, c.want)
+			return nil, nil, fmt.Errorf("%s: refused %q (%v), want %q", c.name, j.Reason, err, c.want)
 		}
 		out = append(out, j)
 	}
 	return map[string]any{
 		"description": "Records refused by the record and content rules (docs/spec.md sections 3.1, 4.6 and 5), each with its reason as the record of its kind, and what admission does with an output whose first field it is (section 8.1): skip one that claims no record, or refuse the transaction for the reason of the record the output claims (admissionClaims, admissionReason), which differs from kind and reason where the magic names the other record. Every one is decided by the record alone. Content cases carry a record that passes the record rules; their content breaks exactly one content rule, and every earlier content rule holds (signatures are valid for the altered document unless the case is a signature case).",
 		"refusals":    out,
-	}, nil
+	}, records, nil
 }
 
 // docCase2 replaces only the signature member of the base envelope.

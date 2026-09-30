@@ -276,11 +276,29 @@ func Generate() (map[string][]byte, error) {
 	if err := putJSON(files, "script-v1.json", sc); err != nil {
 		return nil, err
 	}
-	r, err := refusals(built)
+	r, refused, err := refusals(built)
 	if err != nil {
 		return nil, err
 	}
 	if err := putJSON(files, "refusal-v1.json", r); err != nil {
+		return nil, err
+	}
+	e, err := newTxEnv(built, refused)
+	if err != nil {
+		return nil, err
+	}
+	txv, err := e.transactionVectors()
+	if err != nil {
+		return nil, err
+	}
+	if err := putJSON(files, "transaction-v1.json", txv); err != nil {
+		return nil, err
+	}
+	pv, err := e.paymentVectors()
+	if err != nil {
+		return nil, err
+	}
+	if err := putJSON(files, "payment-v1.json", pv); err != nil {
 		return nil, err
 	}
 	return files, nil
