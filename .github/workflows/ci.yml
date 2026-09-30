@@ -28,6 +28,10 @@ jobs:
       # tidy, nothing is replaced, and go-sdk resolves to exactly v1.5.2.
       - name: dependency set
         run: make deps-check
+      # LICENSE-THIRD-PARTY is generated from what the binaries link; a new
+      # dependency without its licence in the file fails here.
+      - name: licences
+        run: make licences
       # Includes the Go side of the cross-language check: the tests decode,
       # admit and rebuild what the TypeScript codec wrote under testdata/ts.
       - name: test

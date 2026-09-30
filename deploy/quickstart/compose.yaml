@@ -1,0 +1,114 @@
+# The quickstart: all of bbox on one machine, in minutes, with no coin. A
+# local chain stands in for the network; two overlay hosts run the bbox
+# module over one MySQL, host-a with a terms route that prices history;
+# and the bbox command runs beside them, in unicast mode, so every object
+# goes to both hosts. QUICKSTART.md walks through it.
+#
+# The chain (bbox-devchain) has no proof of work and no peers, and nothing
+# it mines is money: it is for trying bbox, never for a network. Every
+# password here is a throwaway meant to be seen.
+#
+# Optional: BBOX_IMAGE, BBOX_HOST_IMAGE and DEVCHAIN_IMAGE name the images
+# (default: the published ones, tag latest).
+
+name: bbox-quickstart
+
+x-host: &host
+  image: ${BBOX_HOST_IMAGE:-ghcr.io/lightwebinc/bbox-host:latest}
+  depends_on:
+    db:
+      condition: service_healthy
+    chain:
+      condition: service_started
+  restart: unless-stopped
+
+services:
+  chain:
+    image: ${DEVCHAIN_IMAGE:-ghcr.io/lightwebinc/bbox-devchain:latest}
+    volumes:
+      - chain:/var/lib/devchain
+    restart: unless-stopped
+
+  db:
+    image: mysql:9@sha256:30a0abfa7b502a496e12339b54cd07aaa70363396dc4b8e8a72a92804a505cd6
+    environment:
+      MYSQL_DATABASE: overlay_a
+      MYSQL_USER: overlay
+      MYSQL_PASSWORD: quickstart
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    command:
+      - --innodb-buffer-pool-size=128M
+      - --performance-schema=OFF
+    configs:
+      - source: second-database
+        target: /docker-entrypoint-initdb.d/second-database.sql
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uoverlay -pquickstart --silent"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    restart: unless-stopped
+
+  # host-a sells the history question on its terms route (port 8090), paid
+  # to BBOX_PAYEE_KEY.
+  host-a:
+    <<: *host
+    environment:
+      BBOX_OFFICES: ${BBOX_OFFICES:-}
+      BBOX_LISTEN: 0.0.0.0:8090
+      BBOX_PRICES: history=5,history-after=5
+      BBOX_PAYEE_KEY: ${BBOX_PAYEE_KEY:-}
+      OVERLAY_KNEX_URL: mysql://overlay:quickstart@db:3306/overlay_a
+      OVERLAY_CHAIN_TRACKER_URL: http://chain:8080
+    volumes:
+      - state-a:/var/lib/bbox
+    ports:
+      - "127.0.0.1:8081:8080"
+      - "127.0.0.1:8091:8090"
+
+  host-b:
+    <<: *host
+    environment:
+      BBOX_OFFICES: ${BBOX_OFFICES:-}
+      OVERLAY_KNEX_URL: mysql://overlay:quickstart@db:3306/overlay_b
+      OVERLAY_CHAIN_TRACKER_URL: http://chain:8080
+    volumes:
+      - state-b:/var/lib/bbox
+    ports:
+      - "127.0.0.1:8082:8080"
+
+  # The command, run with `docker compose run --rm -T bbox <command>`. Its
+  # homes (identities, coin pools, state) are in the named volume `home`,
+  # one directory each, named by BBOX_HOME. It reads host-a's state
+  # directory, for the payee's settle.
+  bbox:
+    image: ${BBOX_IMAGE:-ghcr.io/lightwebinc/bbox:latest}
+    profiles: [cli]
+    environment:
+      BBOX_NETWORK: regtest
+      BBOX_MODE: unicast
+      BBOX_HOSTS: http://host-a:8080,http://host-b:8080
+      BBOX_HISTORY_HOST: http://host-a:8090
+      BBOX_OFFICE: ${BBOX_OFFICES:-}
+      BBOX_HEADER_URL: http://chain:8080
+      BBOX_ASSET: http://chain:8080
+      BBOX_RPC: http://chain:8080/rpc
+      BBOX_SETTLE: rpc:http://chain:8080/rpc
+    volumes:
+      - home:/home/nonroot/.bbox
+      - state-a:/var/lib/bbox-a:ro
+
+configs:
+  second-database:
+    content: |
+      CREATE DATABASE IF NOT EXISTS overlay_b;
+      GRANT ALL PRIVILEGES ON overlay_b.* TO 'overlay'@'%';
+
+volumes:
+  chain:
+  db:
+  home:
+  state-a:
+  state-b:

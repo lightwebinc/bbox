@@ -31,8 +31,8 @@ answered, and not broadcast by the host. Until it is settled, the payer can
 still spend the coins elsewhere: a payment is money only once settled.
 
 key writes BBOX_PAYEE_KEY=<this home's identity private key> to FILE (mode
-0600, never over an existing file), for the host's environment: the home
-is then the payee's wallet.
+0600, never over an existing file), or with -out - to standard output, for
+the host's environment: the home is then the payee's wallet.
 
 settle takes every payment in the ledger that this home has not settled
 into the home's wallet: each is checked to pay the key this identity
@@ -61,8 +61,8 @@ func cmdPayee(ctx context.Context, g *global, args []string) error {
 
 // payeeKey writes the home's identity private key as BBOX_PAYEE_KEY.
 func payeeKey(g *global, out string) error {
-	if out == "" || out == "-" {
-		return usage("payee key writes a secret: name a file with -out (it is created at mode 0600)")
+	if out == "" {
+		return usage("payee key writes a secret: name a file with -out (it is created at mode 0600), or -out - to print it")
 	}
 	raw, err := os.ReadFile(filepath.Join(g.cfg.Home, "identity.json"))
 	if err != nil {
@@ -78,6 +78,12 @@ func payeeKey(g *global, out string) error {
 	if err != nil {
 		return fmt.Errorf("identity.json: %w", err)
 	}
+	line := fmt.Sprintf("BBOX_PAYEE_KEY=%s\n", hex.EncodeToString(k.Serialize()))
+	if out == "-" {
+		fmt.Fprint(g.stdout, line)
+		g.say("the line above is a private key: keep it out of logs and shells' history")
+		return nil
+	}
 	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // the operator's own path
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
@@ -85,7 +91,7 @@ func payeeKey(g *global, out string) error {
 		}
 		return err
 	}
-	if _, err := fmt.Fprintf(f, "BBOX_PAYEE_KEY=%s\n", hex.EncodeToString(k.Serialize())); err != nil {
+	if _, err := fmt.Fprint(f, line); err != nil {
 		f.Close()
 		return err
 	}
