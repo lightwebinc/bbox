@@ -8,7 +8,7 @@
 #
 #	make verify NODE=/path/to/node24
 
-.PHONY: verify test go-test ts-test ts-check ts-build node-check vet fmt-check deps-check vectors vectors-check
+.PHONY: verify test go-test ts-test ts-check ts-build module node-check vet fmt-check deps-check vectors vectors-check e2e
 
 NODE ?= node
 TSC := $(NODE) node_modules/typescript/bin/tsc
@@ -62,11 +62,31 @@ node-check:
 ts-check: node-check
 	cd host && $(TSC) --noEmit
 
+# tsc into host/dist, then the deployable bundle into host/bundle.
 ts-build: node-check
-	cd host && $(NODE) -e "require('node:fs').rmSync('dist', { recursive: true, force: true })" && $(TSC)
+	cd host && $(NODE) -e "require('node:fs').rmSync('dist', { recursive: true, force: true })" && $(TSC) && $(NODE) scripts/bundle.js
+
+# The host module a reference overlay host loads: one file,
+# host/bundle/bbox-module.js, with bcommon inlined and nothing imported but
+# @bsv/sdk (the host's own copy) and Node built-ins. It is copied into the
+# host's tree and named by absolute path in OVERLAY_MODULES (docs/host.md).
+# Its tests (make test) mount that file and run golden vectors through it.
+module: ts-build
 
 ts-test: ts-build
 	cd host && $(NODE) --test "dist/**/*.test.js"
+
+# The module end to end on a local reference overlay host loading the
+# bundle, staged beside the host's node_modules as a deployment places it:
+# submit, lookup, a receipt, a sweep, the suppression attack, a priced
+# question paid through its 402, a restart and the restored index. Not part
+# of verify: it needs Docker (for MySQL) and a reference host directory
+# holding its compiled dist/index.js and its node_modules.
+#
+#	make e2e REFERENCE_HOST=/path/to/reference-host
+e2e: ts-build
+	@test -n "$(REFERENCE_HOST)" || { echo "set REFERENCE_HOST=/path/to/reference-host"; exit 1; }
+	cd host && $(NODE) dist/e2e.js $(abspath $(REFERENCE_HOST))
 
 # Write both vector sets: the Go codec's under testdata/vectors, the
 # TypeScript codec's under testdata/ts. A change to either is a change to
