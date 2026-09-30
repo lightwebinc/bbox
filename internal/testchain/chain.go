@@ -127,6 +127,13 @@ func (c *Chain) Mine() int {
 	return n
 }
 
+// SetHold sets Hold while the chain serves.
+func (c *Chain) SetHold(hold bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Hold = hold
+}
+
 // Waiting is how many accepted transactions are not yet mined.
 func (c *Chain) Waiting() int {
 	c.mu.Lock()

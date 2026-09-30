@@ -4,11 +4,13 @@
 //
 // It is built on bcommon's producer package. A Payer pays for funding trees
 // from the home's coin pool, and Trees mints them, with Ahead, so the next
-// tree is minted and mined before the current one runs out. Payer.Async is
-// off: a tree is settled and waited for, because a carrier spends only a
-// mined tree's output and carries the tree with its proof (spec section
-// 6.3). A funding tree is not published to an office: every carrier carries
-// its own, so Trees publishes through a facade that sends nothing.
+// tree is minted before the current one runs out. Payer.Async is on: a tree
+// is handed to the settlement leg and recorded at once, so a command never
+// waits for a block to mint ahead, and a carrier, which spends only a mined
+// tree's output and carries the tree with its proof (spec section 6.3),
+// waits for the proof only when it needs one. A funding tree is not
+// published to an office: every carrier carries its own, so Trees publishes
+// through a facade that sends nothing.
 //
 // Every object is persisted in the home's state, with the funding output it
 // spends marked used, before it is published: a run that stops part way
@@ -128,6 +130,11 @@ func New(st *state.State, signer *bwallet.Signer, pool *bwallet.Pool, legs Legs,
 	e := &Engine{St: st, Signer: signer, Pool: pool, Legs: legs, Opts: o, Now: time.Now}
 	e.kept = &producer.Kept{Load: e.load}
 	e.payer = e.NewPayer()
+	// Trees are settled without waiting for a block: a tree minted ahead
+	// comes back as soon as the settlement leg takes it, so it is recorded
+	// before the command ends, and spend waits for a proof only when a
+	// carrier needs it.
+	e.payer.Async = true
 	lock := func(ctx context.Context) (*script.Script, error) {
 		return carrier.FundingLock(ctx, signer, signer.Originator, Params)
 	}
@@ -273,12 +280,15 @@ func (e *Engine) Close(ctx context.Context) error {
 // spend returns the funding tree the next carrier spends and the output,
 // the tree's proof cut to the minimal one a host admits.
 func (e *Engine) spend(ctx context.Context) (*transaction.Transaction, uint32, error) {
+	e.promoteAhead()
 	tree, vout, err := e.trees.Spend(ctx, 1)
 	if err != nil {
 		return nil, 0, FeeError(fmt.Errorf("funding tree: %w", err))
 	}
 	if tree.MerklePath == nil {
-		return nil, 0, fmt.Errorf("funding tree %s has no proof: a carrier spends only a mined tree", tree.TxID())
+		if err := e.prove(ctx, tree); err != nil {
+			return nil, 0, err
+		}
 	}
 	mp, err := Minimal(tree.MerklePath, tree.TxID())
 	if err != nil {
@@ -286,6 +296,55 @@ func (e *Engine) spend(ctx context.Context) (*transaction.Transaction, uint32, e
 	}
 	tree.MerklePath = mp
 	return tree, vout, nil
+}
+
+// promoteAhead makes a tree minted ahead by an earlier run the current one
+// when the current tree is used up: the library keeps a tree minted ahead
+// in memory only, and a run that ended recorded it in Ahead.
+func (e *Engine) promoteAhead() {
+	st := e.St
+	if st.Tree != nil && st.Tree.Remaining() > 0 {
+		return
+	}
+	for _, t := range st.Ahead {
+		if t.IdentityKeyHex == e.Signer.IdentityHex() && t.Remaining() > 0 {
+			_ = treeState{e}.Adopt(t)
+			e.note("switching to funding tree %s, minted ahead by an earlier run", t.Txid)
+			return
+		}
+	}
+}
+
+// prove waits for a funding tree's proof: a carrier spends only a mined
+// tree and carries it with its proof (spec section 6.3). Trees are settled
+// without waiting, so a tree minted ahead never holds a command up; the
+// first tree, and one needed before its block, is waited for here.
+func (e *Engine) prove(ctx context.Context, tree *transaction.Transaction) error {
+	id := tree.TxID().String()
+	mp, height, err := producer.Proofs{Arcade: e.Legs.Arcade, Asset: e.Legs.Asset}.Of(ctx, id)
+	if err != nil {
+		e.note("funding tree %s: waiting for it to mine", id)
+		if mp, height, err = e.NewPayer().Await(ctx, "funding tree", tree); err != nil {
+			return fmt.Errorf("funding tree %s: %w (it is recorded; the next command waits again)", id, err)
+		}
+	}
+	tree.MerklePath = mp
+	e.kept.Prove(id, mp)
+	CollectChange(ctx, e.Pool, e.Legs.Asset)
+	for _, t := range append([]*funding.Tree{e.St.Tree}, ptrs(e.St.Trees)...) {
+		if t != nil && t.Txid == id {
+			t.BumpHex, t.Height, t.BeefHex = mp.Hex(), height, ""
+		}
+	}
+	return e.St.Save()
+}
+
+func ptrs(ts []funding.Tree) []*funding.Tree {
+	out := make([]*funding.Tree, len(ts))
+	for i := range ts {
+		out[i] = &ts[i]
+	}
+	return out
 }
 
 // carrierFor mints the carrier of payload on the next funding output, holds

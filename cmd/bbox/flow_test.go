@@ -11,6 +11,7 @@ import (
 	"github.com/lightwebinc/bbox/internal/testchain"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPlaneSendListReadAck(t *testing.T) {
@@ -236,5 +237,44 @@ func TestAHostThatEditsAnEnvelopeIsRefused(t *testing.T) {
 	h.want(r, exitRefused, "host "+h.bS.URL+": REFUSED "+tx)
 	if !strings.Contains(r.stdout, "the real text") || !strings.Contains(r.stdout, "hosts    "+h.aS.URL+"\n") {
 		t.Fatalf("the envelope from the honest host:\n%s", r.stdout)
+	}
+}
+
+// A tree minted ahead never holds a command up: it is recorded as soon as
+// the settlement leg takes it, and a later run switches to it, waiting for
+// its block only when a carrier needs it.
+func TestMintAheadDoesNotWaitForABlock(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	h.send("alice", bob, "one")
+	// From here nothing mines until the chain is told to.
+	h.chain.SetHold(true)
+	r := h.must("alice", "", "send", bob, "-m", "two", "-rate", "20", "-tree-count", "4")
+	if !strings.Contains(r.stderr, "has 2 output(s) left, so the next is minted ahead") {
+		t.Fatalf("no mint ahead:\n%s", r.stderr)
+	}
+	h.send("alice", bob, "three")
+	h.send("alice", bob, "four")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for h.chain.Waiting() == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond)
+		h.chain.Mine()
+	}()
+	r = h.must("alice", "", "send", bob, "-m", "five", "-rate", "20", "-tree-count", "4")
+	<-done
+	if !strings.Contains(r.stderr, "minted ahead by an earlier run") {
+		t.Fatalf("no switch to the tree minted ahead:\n%s", r.stderr)
+	}
+	h.chain.SetHold(false)
+	r = h.must("bob", "", "list")
+	if strings.Count(r.stdout, "\n") != 5 {
+		t.Fatalf("list:\n%s\n%s", r.stdout, r.stderr)
 	}
 }
