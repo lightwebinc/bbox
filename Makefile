@@ -8,7 +8,7 @@
 #
 #	make verify NODE=/path/to/node24
 
-.PHONY: verify test go-test ts-test ts-check ts-build module node-check vet fmt-check deps-check vectors vectors-check e2e
+.PHONY: verify test go-test ts-test ts-check ts-build module node-check vet fmt-check deps-check vectors vectors-check e2e e2e-client
 
 NODE ?= node
 TSC := $(NODE) node_modules/typescript/bin/tsc
@@ -23,8 +23,10 @@ test: go-test ts-test
 go-test:
 	GOWORK=off go test -race -count=2 ./...
 
+# The e2e build tag is vetted too, so the client end to end compiles.
 vet:
 	GOWORK=off go vet ./...
+	GOWORK=off go vet -tags e2e ./cmd/bbox/
 
 fmt-check:
 	@test -z "$$(gofmt -l .)" || { echo "gofmt:"; gofmt -l .; exit 1; }
@@ -87,6 +89,22 @@ ts-test: ts-build
 e2e: ts-build
 	@test -n "$(REFERENCE_HOST)" || { echo "set REFERENCE_HOST=/path/to/reference-host"; exit 1; }
 	cd host && $(NODE) dist/e2e.js $(abspath $(REFERENCE_HOST))
+
+# The bbox command end to end against two local reference hosts loading the
+# bundle, over a local chain (internal/testchain) serving the node's API and
+# the header source: send on a stand-in plane and in unicast, both hosts
+# agreeing on the box, read and ack, a payment inside an envelope
+# internalized, a paid history question (402) and the payee settling it, a
+# drop, a host restarted and restored, and a send persisted while a host was
+# down and published by the next. Not part of verify: it needs Docker (for
+# MySQL) and a reference host directory holding its compiled dist/index.js
+# and its node_modules.
+#
+#	make e2e-client REFERENCE_HOST=/path/to/reference-host
+e2e-client: ts-build
+	@test -n "$(REFERENCE_HOST)" || { echo "set REFERENCE_HOST=/path/to/reference-host"; exit 1; }
+	BBOX_E2E_REFERENCE_HOST=$(abspath $(REFERENCE_HOST)) BBOX_E2E_NODE=$(NODE) \
+		GOWORK=off go test -tags e2e -count=1 -v -run 'TestClientE2E$$' ./cmd/bbox/
 
 # Write both vector sets: the Go codec's under testdata/vectors, the
 # TypeScript codec's under testdata/ts. A change to either is a change to
