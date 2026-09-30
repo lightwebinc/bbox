@@ -311,6 +311,7 @@ func refusals(built []*sealed) (map[string]any, map[string][]byte, error) {
 		{"content-payment-missing", "", docCase(func(o *boxrec.Object) { *o = *o.Without(boxrec.MemberPayment) }), "content-shape"},
 		{"content-quote-number", "", docCase(func(o *boxrec.Object) { o.Set(boxrec.MemberQuoteID, boxrec.Int(1)) }), "content-shape"},
 		{"content-cipher-truncated", "base64 with its last character removed", docCase(func(o *boxrec.Object) { o.Set(boxrec.MemberContent, b64[:len(b64)-1]) }), "content-cipher"},
+		{"content-cipher-line-break", "standard base64 broken by a line break after 64 characters, which some decoders skip", docCase(func(o *boxrec.Object) { o.Set(boxrec.MemberContent, b64[:64]+"\n"+b64[64:]) }), "content-cipher"},
 		{"content-cipher-short", "149 bytes: one under the shortest BRC-78 message", docCase(func(o *boxrec.Object) {
 			o.Set(boxrec.MemberContent, base64.StdEncoding.EncodeToString(base.brc78[:boxrec.BRC78Min-1]))
 		}), "content-cipher"},

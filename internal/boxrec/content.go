@@ -146,8 +146,10 @@ func ParseContent(e *Envelope) (*Content, error) {
 		return nil, fmt.Errorf("%w: %s", ErrContentShape, MemberSignature)
 	}
 
+	// Go's decoder skips line breaks, so the round trip is what holds the
+	// member to one standard padded base64 string.
 	cipher, err := base64.StdEncoding.Strict().DecodeString(b64)
-	if err != nil || len(cipher) < BRC78Min {
+	if err != nil || base64.StdEncoding.EncodeToString(cipher) != b64 || len(cipher) < BRC78Min {
 		return nil, fmt.Errorf("%w: not a BRC-78 message in standard base64", ErrContentCipher)
 	}
 	if !bytes.Equal(cipher[:4], BRC78Version) || !bytes.Equal(cipher[4:37], e.From) || !bytes.Equal(cipher[37:70], e.To) {
@@ -168,14 +170,14 @@ func ParseContent(e *Envelope) (*Content, error) {
 	return c, nil
 }
 
-// strictDER parses a strict DER signature with a low S value: the one
-// encoding go-sdk writes.
+// strictDER parses a strict DER signature with a low S value (StrictSignature):
+// the one encoding go-sdk writes.
 func strictDER(b []byte) (*ec.Signature, bool) {
-	if len(b) == 0 {
+	if !StrictSignature(b) {
 		return nil, false
 	}
 	sig, err := ec.ParseDERSignature(b)
-	if err != nil || !bytes.Equal(sig.Serialize(), b) {
+	if err != nil {
 		return nil, false
 	}
 	return sig, true
