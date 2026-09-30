@@ -33,6 +33,7 @@ travel inside an envelope, unbroadcast, for the recipient to internalize.
 | Implement a compatible sender, reader or host | [docs/spec.md](docs/spec.md) (the specification) |
 | Know what cannot change once published | [docs/frozen.md](docs/frozen.md) |
 | Know the defaults and caps, and why each is set where it is | [docs/limits.md](docs/limits.md) |
+| Run a host: the module, its configuration, the terms route | [docs/host.md](docs/host.md) |
 
 ## Build and test
 
@@ -40,6 +41,8 @@ travel inside an envelope, unbroadcast, for the recipient to internalize.
 $ (cd host && npm ci)   # once
 $ make verify           # gofmt, vet, dependency set, typecheck, vectors, tests
 $ make vectors          # regenerate both vector sets
+$ make module           # the host module, host/bundle/bbox-module.js
+$ make e2e REFERENCE_HOST=/path/to/reference-host   # needs Docker
 ```
 
 Go 1.27.1 or later and Node 24; `NODE=/path/to/node` selects a Node 24
