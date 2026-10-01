@@ -281,7 +281,8 @@ func (e *RefusedError) Error() string {
 	return fmt.Sprintf("purse: payment %s is refused by the network and will never mine: %s (the payer spent its inputs elsewhere)", e.Txid, termsafe.Text(e.Why))
 }
 
-// Await waits, up to Wait, for a broadcast payment to mine.
+// Await waits, up to Wait, for a broadcast payment to mine, and stops at
+// once when the node shows one of its inputs spent by another transaction.
 func (p *Purse) Await(ctx context.Context, in *Incoming) error {
 	if in.mp != nil {
 		return nil
@@ -295,7 +296,7 @@ func (p *Purse) Await(ctx context.Context, in *Incoming) error {
 	}
 	wctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	mp, h, err := nodeapi.WaitMined(wctx, p.Asset, in.Txid, poll)
+	mp, h, err := nodeapi.WaitSettled(wctx, p.Asset, in.Tx, poll)
 	if err != nil {
 		if why := chainview.SpentElsewhere(ctx, p.Asset, in.Tx); why != "" {
 			return &RefusedError{Txid: in.Txid, Why: why}

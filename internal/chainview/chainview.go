@@ -1,6 +1,7 @@
 // Package chainview answers, from the network's own words and the node's
 // view of outputs, whether a transaction can still mine: what a settlement
-// leg's error means, and which transaction spent an output. A sender's
+// leg's error means, and which input another transaction spent, in words
+// over bcommon's view of the node (nodeapi.Asset.SpentElsewhere). A sender's
 // sweep and a payee's payment both need it, since a leg that accepted a
 // transaction (arcade has answered ACCEPTED_BY_NETWORK for a transaction
 // whose input was already spent and mined) or that answers nothing (the tcp
@@ -9,15 +10,12 @@ package chainview
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
@@ -70,77 +68,15 @@ func RefusedAnswer(err error) (string, bool) {
 	return "", false
 }
 
-// ErrUnknownTx is a transaction the node does not know.
-var ErrUnknownTx = errors.New("the node does not know the transaction")
-
-// Spender reads the node's UTXO view of txid (/api/v1/utxos/<txid>/json)
-// and names the transaction that spent output vout, or "" while it is
-// unspent.
-func Spender(ctx context.Context, a *nodeapi.Asset, txid string, vout uint32) (string, error) {
-	if a == nil {
-		return "", errors.New("no node is configured")
-	}
-	c := a.Client
-	if c == nil {
-		c = &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(a.Base, "/")+"/api/v1/utxos/"+txid+"/json", nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := c.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return "", err
-	}
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusNotFound:
-		return "", ErrUnknownTx
-	default:
-		return "", fmt.Errorf("the node's UTXO view of %s: status %d", txid, resp.StatusCode)
-	}
-	var outs []struct {
-		Vout     uint32 `json:"vout"`
-		Status   string `json:"status"`
-		Spending *struct {
-			TxID string `json:"txId"`
-		} `json:"spendingData"`
-	}
-	if err := json.Unmarshal(body, &outs); err != nil {
-		return "", fmt.Errorf("the node's UTXO view of %s: %w", txid, err)
-	}
-	for _, o := range outs {
-		if o.Vout != vout {
-			continue
-		}
-		if strings.EqualFold(o.Status, "SPENT") {
-			if o.Spending == nil || o.Spending.TxID == "" {
-				return "", fmt.Errorf("the node's UTXO view of %s says output %d is spent and names no spender", txid, vout)
-			}
-			return o.Spending.TxID, nil
-		}
-		return "", nil
-	}
-	return "", fmt.Errorf("the node's UTXO view of %s has no output %d", txid, vout)
-}
-
 // SpentElsewhere names the first input of tx that the node shows spent by
 // another transaction, in words, or "" when none is: then tx can still
 // mine as far as its inputs go. An input the node cannot answer for is
-// passed over.
+// passed over. The node's view is bcommon's (nodeapi.Asset.SpentElsewhere);
+// this only words it.
 func SpentElsewhere(ctx context.Context, a *nodeapi.Asset, tx *transaction.Transaction) string {
-	txid := tx.TxID().String()
-	for i, in := range tx.Inputs {
-		src := in.SourceTXID.String()
-		by, err := Spender(ctx, a, src, in.SourceTxOutIndex)
-		if err == nil && by != "" && by != txid {
-			return fmt.Sprintf("input %d (%s.%d) is spent by %s", i, src, in.SourceTxOutIndex, by)
-		}
+	var se *nodeapi.SpentError
+	if errors.As(a.SpentElsewhere(ctx, tx), &se) {
+		return fmt.Sprintf("input %d (%s) is spent by %s", se.Input, se.Outpoint, se.By)
 	}
 	return ""
 }

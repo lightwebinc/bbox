@@ -2,6 +2,7 @@ package send
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
@@ -60,7 +61,10 @@ func (e *Engine) failSweep(ctx context.Context, sw *state.Sweep, why string) err
 	sw.Failed = why
 	coin := "its fee coin was not recorded (a sweep built by an earlier version); `bbox doctor` shows the pool"
 	if f := sw.Fee; f != nil {
-		by, err := chainview.Spender(ctx, e.Legs.Asset, f.TxID, f.Vout)
+		by, err := "", errors.New("no node is configured")
+		if e.Legs.Asset != nil {
+			by, err = e.Legs.Asset.Spender(ctx, f.TxID, f.Vout)
+		}
 		switch {
 		case err != nil:
 			coin = fmt.Sprintf("its fee coin %s was not given back: the node could not say whether it is spent (%v)", f.Outpoint(), err)
