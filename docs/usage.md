@@ -408,15 +408,19 @@ $ bbox -home /srv/payee payee key -out /etc/bbox/payee.env
 wrote BBOX_PAYEE_KEY to /etc/bbox/payee.env for payee 03d4...a2b1
 $ bbox -home /srv/payee payee settle /var/lib/bbox/payments.jsonl
 settled 0e8f...4c21: 5 sat for history from 03a1b2c3d4e5
-1 payment(s) settled, 5 sat; 0 settled before; 0 not settled; pool 1 output(s), 5 sat
+1 payment(s) settled, 5 sat; 0 settled before; 0 not settled; 0 refused (0 before); pool 1 output(s), 5 sat
 ```
 
 A host records every payment its terms route accepts in `payments.jsonl`
 and does not broadcast it. **Until a payment is settled, its payer can
 spend the same coins elsewhere**, so the payee settles on a schedule.
 `payee settle` internalizes each payment the home has not settled, as
-`internalize` does, and records it; one the network refuses is reported
-and left, and the exit is 1. It checks every payment first, broadcasts
+`internalize` does, and records it. One the network refuses for good (its
+payer spent the inputs elsewhere, which the node's view of the inputs
+shows even when the settlement leg accepted it) is reported as `REFUSED,
+NEVER SETTLES`, recorded, and passed over by later runs; the exit is 1 on
+the run that finds it. One that merely did not mine in time is `NOT
+SETTLED`, tried again next run, exit 1. It checks every payment first, broadcasts
 them all, and then waits for their proofs together, so a run takes about
 one block however many it settles; `-in-flight N` (default 16, at most 64)
 bounds how many are broadcast and not yet mined at once. docs/host.md says

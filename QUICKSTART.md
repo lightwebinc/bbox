@@ -147,7 +147,7 @@ paid 5 sat to 03d4f2a9c1b7 in 0e8f…4c21, recorded by the host for its payee to
 ...
 $ as payee payee settle /var/lib/bbox-a/payments.jsonl
 settled 0e8f…4c21: 5 sat for history from 03a1b2c3d4e5
-1 payment(s) settled, 5 sat; 0 settled before; 0 not settled; pool 1 output(s), 5 sat
+1 payment(s) settled, 5 sat; 0 settled before; 0 not settled; 0 refused (0 before); pool 1 output(s), 5 sat
 ```
 
 `history` asked host-a's terms route over BRC-104; host-a answered 402 with

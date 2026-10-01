@@ -44,6 +44,9 @@ import (
 	"github.com/lightwebinc/bcommon/nodeapi"
 	"github.com/lightwebinc/bcommon/producer"
 	"github.com/lightwebinc/bcommon/publish"
+	"github.com/lightwebinc/bcommon/termsafe"
+
+	"github.com/lightwebinc/bbox/internal/chainview"
 )
 
 // Purse is the home's wallet. The embedded wallet answers the key and
@@ -249,9 +252,33 @@ func (p *Purse) Broadcast(ctx context.Context, in *Incoming) error {
 		return errors.New("purse: no settlement leg to broadcast the payment (config key settle)")
 	}
 	if err := p.Settler.Submit(ctx, in.Tx); err != nil && !alreadyKnown(err) {
+		if why, ok := chainview.RefusedAnswer(err); ok {
+			return &RefusedError{Txid: in.Txid, Why: why}
+		}
+		if why := chainview.SpentElsewhere(ctx, p.Asset, in.Tx); why != "" {
+			return &RefusedError{Txid: in.Txid, Why: why}
+		}
 		return fmt.Errorf("purse: broadcasting payment %s: %w (the payer may have spent its inputs elsewhere)", in.Txid, err)
 	}
+	// A leg's acceptance is not the network's: arcade has answered
+	// ACCEPTED_BY_NETWORK for a payment whose input was already spent and
+	// mined. The node's view of the inputs says before any wait.
+	if why := chainview.SpentElsewhere(ctx, p.Asset, in.Tx); why != "" {
+		return &RefusedError{Txid: in.Txid, Why: why}
+	}
 	return nil
+}
+
+// RefusedError is a payment the network will never mine: the leg refused
+// it for good, or one of its inputs is spent by another transaction. The
+// payer took the coins back; there is nothing to settle.
+type RefusedError struct {
+	Txid string
+	Why  string
+}
+
+func (e *RefusedError) Error() string {
+	return fmt.Sprintf("purse: payment %s is refused by the network and will never mine: %s (the payer spent its inputs elsewhere)", e.Txid, termsafe.Text(e.Why))
 }
 
 // Await waits, up to Wait, for a broadcast payment to mine.
@@ -270,6 +297,9 @@ func (p *Purse) Await(ctx context.Context, in *Incoming) error {
 	defer cancel()
 	mp, h, err := nodeapi.WaitMined(wctx, p.Asset, in.Txid, poll)
 	if err != nil {
+		if why := chainview.SpentElsewhere(ctx, p.Asset, in.Tx); why != "" {
+			return &RefusedError{Txid: in.Txid, Why: why}
+		}
 		return fmt.Errorf("purse: payment %s is broadcast and not yet mined (%v); run the command again to take it into the pool once it is", in.Txid, err)
 	}
 	in.mp, in.h = mp, h

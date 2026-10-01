@@ -161,7 +161,7 @@ $ bbox -home /srv/payee payee key -out /etc/bbox/payee.env
 $ # BBOX_PAYEE_KEY from payee.env goes into the host's environment
 $ bbox -home /srv/payee payee settle /var/lib/bbox/payments.jsonl
 settled 7c1e...: 5 sat for history from 03a1b2c3d4e5
-1 payment(s) settled, 5 sat; 0 settled before; 0 not settled; pool 1 output(s), 5 sat
+1 payment(s) settled, 5 sat; 0 settled before; 0 not settled; 0 refused (0 before); pool 1 output(s), 5 sat
 ```
 
 `payee key` writes the home's identity key as `BBOX_PAYEE_KEY=<hex>` to a
@@ -176,12 +176,32 @@ payment is broadcast before any is waited for, so a run takes about one
 block however many lines it settles; `-in-flight` (default 16, at most 64)
 bounds how many are broadcast and not yet mined at once.
 
-A payment the network refuses, because the payer spent its inputs
-elsewhere, is reported as `payment <txid> (<sats> sat, <class>): NOT
-SETTLED: ...` with the settlement leg's reason, left unsettled, and makes
-the command exit 1. Nothing recovers it: the question it paid for was
-answered, and the payee has nothing. That is the price of the window
-between answering and settling, and why the window should be short.
+**A payment its payer double-spent before settle.** The payer can spend
+the payment's input elsewhere at any time until the payment mines. The
+payee then sees this, at once rather than after waiting for a block:
+
+```text
+payment 7c1e...: (5 sat, history): REFUSED, NEVER SETTLES: input 0 (41d0...77aa.1) is spent by 9b3f...0c2e; the payer took the coins back after the question was answered
+0 payment(s) settled, 0 sat; 3 settled before; 0 not settled; 1 refused (0 before); pool 3 output(s), 15 sat
+bbox: 1 payment(s) refused by the network: their payers spent the coins elsewhere, and they will never settle
+```
+
+and the command exits 1. A refusal is the settlement leg refusing it for
+good, or the node showing one of its inputs spent by another transaction.
+The second check matters: a settlement leg's acceptance is not the
+network's (arcade has answered `ACCEPTED_BY_NETWORK` for a payment whose
+input was already spent and mined), so settle asks the node about the
+inputs before it waits. The payment is recorded in the payee's home as
+refused and every later run counts it in `refused (N before)` without
+trying it again, so a timer does not fail on it forever. Nothing recovers
+it: the question it paid for was answered and the payee has nothing. That
+is the price of the window between answering and settling, and why the
+window should be short. The host's own `bbox_payments_total{result="accepted"}`
+counted it when it answered, so accepted minus settled is what the payee
+lost or has still to settle.
+
+Any other failure (the leg unreachable, no block inside the wait) is
+reported as `NOT SETTLED`, left for the next run, and also exits 1.
 Running settle again is safe: what is settled is skipped, and the pool
 refuses an outpoint twice. A BRC-100 wallet holding the payee key can
 settle the same lines itself.

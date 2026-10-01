@@ -506,7 +506,8 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 	}
 	if _, err := p.InternalizeAction(ctx, wallet.InternalizeActionArgs{Tx: beef, Description: "bbox payment received",
 		Labels: []string{"bbox", "payment"}, Outputs: outs}, g.cfg.Originator); err != nil {
-		if strings.Contains(err.Error(), "spent its inputs") {
+		var re *purse.RefusedError
+		if errors.As(err, &re) || strings.Contains(err.Error(), "spent its inputs") {
 			return refused("%v: the payment is reclaimed or double-spent", err)
 		}
 		return err

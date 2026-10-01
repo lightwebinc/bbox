@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"os"
@@ -596,5 +597,70 @@ func TestListFillCopiesAMissingEnvelopeAcross(t *testing.T) {
 	r = h.must("bob", "", "list")
 	if !strings.Contains(r.stdout, tx[1]) || strings.Contains(r.stderr, "DISAGREES") {
 		t.Fatalf("list after fill:\n%s\n%s", r.stdout, r.stderr)
+	}
+}
+
+// A payment whose payer spent its input elsewhere before the payee settled
+// never mines: settle says so at once (not after a wait for a block),
+// records it, and passes it over on every later run. Through a node's RPC,
+// which refuses it, and through the tcp ingress, which answers nothing.
+func TestSettleReportsADoubleSpentPaymentOnce(t *testing.T) {
+	t.Parallel()
+	for _, leg := range []string{"rpc", "tcp"} {
+		t.Run(leg, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.identity("bob")
+			h.identity("payee")
+			h.newOffice("bob")
+			h.startPaid(t, "payee", 7)
+			h.must("bob", "", "history")
+			if len(h.paid.Payments) != 1 {
+				t.Fatalf("payments %d", len(h.paid.Payments))
+			}
+			ledger := filepath.Join(h.dir, "payments.jsonl")
+			if err := os.WriteFile(ledger, h.paid.Ledger(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var line struct {
+				Beef string `json:"beef"`
+			}
+			if err := json.Unmarshal(bytes.SplitN(h.paid.Ledger(), []byte("\n"), 2)[0], &line); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := base64.StdEncoding.DecodeString(line.Beef)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := transaction.NewTransactionFromBEEF(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			other := strings.Repeat("cd", 32)
+			h.chain.SpendElsewhere(p.Inputs[0].SourceTXID.String(), p.Inputs[0].SourceTxOutIndex, other)
+			if leg == "tcp" {
+				l, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { l.Close() })
+				h.chain.Ingress(l)
+				h.env["BBOX_SETTLE"] = "tcp:" + l.Addr().String()
+			}
+			start := time.Now()
+			r := h.run("payee", "", "payee", "settle", ledger)
+			h.want(r, exitRefused, "REFUSED, NEVER SETTLES")
+			why := map[string]string{"rpc": "rpc error -26: missing or spent input", "tcp": "is spent by " + other}[leg]
+			if !strings.Contains(r.stderr, why) || !strings.Contains(r.stdout, "0 not settled; 1 refused (0 before)") {
+				t.Fatalf("settle:\n%s\n%s", r.stdout, r.stderr)
+			}
+			if d := time.Since(start); d > 20*time.Second {
+				t.Fatalf("settle took %s: it waited for a block that never comes", d)
+			}
+			r = h.must("payee", "", "payee", "settle", ledger)
+			if !strings.Contains(r.stdout, "0 not settled; 0 refused (1 before)") {
+				t.Fatalf("settle again:\n%s\n%s", r.stdout, r.stderr)
+			}
+		})
 	}
 }

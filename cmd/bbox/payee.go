@@ -21,6 +21,7 @@ import (
 
 	"github.com/lightwebinc/bbox/internal/limits"
 	"github.com/lightwebinc/bbox/internal/purse"
+	"github.com/lightwebinc/bbox/internal/state"
 )
 
 const payeeHelp = `usage: bbox payee key -out FILE
@@ -163,7 +164,7 @@ func payeeSettle(ctx context.Context, g *global, path string, inFlight int) erro
 	if err != nil {
 		return err
 	}
-	var settled, already, failed int
+	var settled, already, failed, unsettleable, refusedNow int
 	var sats uint64
 	notSettled := func(l ledgerLine, err error) {
 		failed++
@@ -180,6 +181,10 @@ func payeeSettle(ctx context.Context, g *global, path string, inFlight int) erro
 	for _, l := range lines {
 		if slices.Contains(h.st.Settled, l.Txid) {
 			already++
+			continue
+		}
+		if h.st.IsUnsettleable(l.Txid) {
+			unsettleable++
 			continue
 		}
 		in, err := checkPayment(ctx, g, p, l)
@@ -218,6 +223,18 @@ func payeeSettle(ctx context.Context, g *global, path string, inFlight int) erro
 		if err == nil {
 			err = p.Take(r.in)
 		}
+		var re *purse.RefusedError
+		if errors.As(err, &re) {
+			// It will never mine: reported once, recorded, and passed over
+			// by every later run.
+			refusedNow++
+			g.say("payment %s (%d sat, %s): REFUSED, NEVER SETTLES: %s; the payer took the coins back after the question was answered", r.l.Txid, r.l.Satoshis, termsafe.Text(r.l.Class), termsafe.Text(re.Why))
+			h.st.Unsettleable = append(h.st.Unsettleable, state.Unsettleable{Txid: r.l.Txid, Why: re.Why})
+			if err := h.st.Save(); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			notSettled(r.l, err)
 			continue
@@ -230,9 +247,12 @@ func payeeSettle(ctx context.Context, g *global, path string, inFlight int) erro
 		sats += r.l.Satoshis
 		fmt.Fprintf(g.stdout, "settled %s: %d sat for %s from %s\n", r.l.Txid, r.l.Satoshis, termsafe.Text(r.l.Class), termsafe.Abbrev(r.l.SenderIdentityKey))
 	}
-	fmt.Fprintf(g.stdout, "%d payment(s) settled, %d sat; %d settled before; %d not settled; pool %d output(s), %d sat\n",
-		settled, sats, already, failed, h.e.Pool.Count(), h.e.Pool.Balance())
-	if failed > 0 {
+	fmt.Fprintf(g.stdout, "%d payment(s) settled, %d sat; %d settled before; %d not settled; %d refused (%d before); pool %d output(s), %d sat\n",
+		settled, sats, already, failed, refusedNow, unsettleable, h.e.Pool.Count(), h.e.Pool.Balance())
+	switch {
+	case refusedNow > 0:
+		return refused("%d payment(s) refused by the network: their payers spent the coins elsewhere, and they will never settle", refusedNow)
+	case failed > 0:
 		return refused("%d payment(s) not settled: until one is, its payer can spend the coins elsewhere", failed)
 	}
 	return nil
