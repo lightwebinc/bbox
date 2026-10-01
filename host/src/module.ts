@@ -21,6 +21,11 @@
  *   BBOX_SESSIONS         the most BRC-104 sessions the terms route keeps;
  *                         default 10000
  *   BBOX_SESSION_TTL      seconds an idle BRC-104 session is kept; default 600
+ *   BBOX_HANDSHAKES_PER_SEC, BBOX_HANDSHAKE_BURST
+ *                         the BRC-104 handshakes a second the terms route
+ *                         answers, and at once; default 4 and 8 (budget.ts)
+ *   BBOX_HANDSHAKES_PER_ADDR_PER_SEC, BBOX_HANDSHAKE_ADDR_BURST
+ *                         the same for one remote address; default 1 and 4
  *
  * Every `tm_bbox_` topic in OVERLAY_TOPICS must be an office named here,
  * because a bbox topic left to the host's default manager would admit
@@ -31,6 +36,7 @@ import type { Server } from 'node:http'
 import { PrivateKey, ProtoWallet } from '@bsv/sdk'
 import type { Module, ModuleHost } from '@lightwebinc/bcommon'
 import { DefaultMaxBEEF } from './beef.js'
+import { DefaultBudget, type BudgetConfig } from './budget.js'
 import { LookupService, TopicPrefix, checkOffice, topic } from './boxrec.js'
 import { FileJournal, type Journal } from './journal.js'
 import { BboxLookupService, FloorDays } from './ls_bbox.js'
@@ -57,6 +63,7 @@ export interface Config {
   payeeKey?: PrivateKey
   headersURL?: string
   sessions: { max: number; ttlSeconds: number }
+  handshakes: BudgetConfig
 }
 
 /** Parses BBOX_OFFICES. Throws on anything it cannot take exactly. */
@@ -83,6 +90,14 @@ function integer(name: string, raw: string | undefined, def: number, min: number
   return Number(v)
 }
 
+/** A positive rate, decimals allowed, at most 1e6. */
+function rate(name: string, raw: string | undefined, def: number): number {
+  if (raw === undefined || raw.trim() === '') return def
+  const v = raw.trim()
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(v) || !(Number(v) > 0) || Number(v) > 1e6) throw new Error(`${name}: "${raw}" is not a positive number of at most 1000000`)
+  return Number(v)
+}
+
 /** Reads the whole configuration from env. */
 export function parseConfig(env: NodeJS.ProcessEnv): Config {
   const offices = parseOffices(env['BBOX_OFFICES'])
@@ -99,6 +114,12 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     sessions: {
       max: integer('BBOX_SESSIONS', env['BBOX_SESSIONS'], DefaultMaxSessions, 1),
       ttlSeconds: integer('BBOX_SESSION_TTL', env['BBOX_SESSION_TTL'], DefaultSessionTTL, 1),
+    },
+    handshakes: {
+      perSec: rate('BBOX_HANDSHAKES_PER_SEC', env['BBOX_HANDSHAKES_PER_SEC'], DefaultBudget.perSec),
+      burst: integer('BBOX_HANDSHAKE_BURST', env['BBOX_HANDSHAKE_BURST'], DefaultBudget.burst, 1),
+      perAddressPerSec: rate('BBOX_HANDSHAKES_PER_ADDR_PER_SEC', env['BBOX_HANDSHAKES_PER_ADDR_PER_SEC'], DefaultBudget.perAddressPerSec),
+      addressBurst: integer('BBOX_HANDSHAKE_ADDR_BURST', env['BBOX_HANDSHAKE_ADDR_BURST'], DefaultBudget.addressBurst, 1),
     },
   }
   const listen = env['BBOX_LISTEN']?.trim()
@@ -174,6 +195,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
       receiver: priced.size > 0 ? new LedgerReceiver(c.stateDir) : undefined,
       headers: c.headersURL === undefined ? undefined : new HeaderTracker(c.headersURL),
       sessions: c.sessions,
+      budget: c.handshakes,
     })
   }
   const start = async (): Promise<Server | undefined> => {
@@ -194,6 +216,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
     terms: c.listen === undefined ? 'none' : `${c.listen.host}:${c.listen.port}`,
     priced: [...priced].join(',') || 'none',
     sessions: c.listen === undefined ? 'none' : `${c.sessions.max}, idle ${c.sessions.ttlSeconds}s`,
+    handshakes: c.listen === undefined ? 'none' : `${c.handshakes.perSec}/s burst ${c.handshakes.burst}, per address ${c.handshakes.perAddressPerSec}/s burst ${c.handshakes.addressBurst}`,
     build,
   })
   return { module: { topics, lookups: { [LookupService]: ls } }, ls, front, start }

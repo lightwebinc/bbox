@@ -49,6 +49,14 @@ test('the configuration: a state directory is required, floors hold, and a price
   assert.deepEqual(parseConfig({ ...base, BBOX_SESSIONS: '50', BBOX_SESSION_TTL: '60' }).sessions, { max: 50, ttlSeconds: 60 })
   assert.throws(() => parseConfig({ ...base, BBOX_SESSIONS: '0' }), /BBOX_SESSIONS/)
   assert.throws(() => parseConfig({ ...base, BBOX_SESSION_TTL: 'soon' }), /BBOX_SESSION_TTL/)
+  assert.deepEqual(c.handshakes, { perSec: 4, burst: 8, perAddressPerSec: 1, addressBurst: 4 }, 'the handshake budget has a default')
+  assert.deepEqual(
+    parseConfig({ ...base, BBOX_HANDSHAKES_PER_SEC: '2.5', BBOX_HANDSHAKE_BURST: '5', BBOX_HANDSHAKES_PER_ADDR_PER_SEC: '0.5', BBOX_HANDSHAKE_ADDR_BURST: '2' }).handshakes,
+    { perSec: 2.5, burst: 5, perAddressPerSec: 0.5, addressBurst: 2 },
+  )
+  for (const [k, v] of [['BBOX_HANDSHAKES_PER_SEC', '0'], ['BBOX_HANDSHAKES_PER_SEC', '-1'], ['BBOX_HANDSHAKES_PER_ADDR_PER_SEC', 'fast'], ['BBOX_HANDSHAKE_BURST', '0'], ['BBOX_HANDSHAKE_ADDR_BURST', '1.5']]) {
+    assert.throws(() => parseConfig({ ...base, [k!]: v }), new RegExp(k!))
+  }
 })
 
 /** The reference loader's checks on what a factory returned. */

@@ -7,7 +7,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
-import type { Server } from 'node:http'
+import { request, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Engine } from '@bsv/overlay'
@@ -24,6 +24,7 @@ import {
   type PeerSession,
   type WalletInterface,
 } from '@bsv/sdk'
+import { DefaultBudget, type BudgetConfig } from './budget.js'
 import { MemoryJournal } from './journal.js'
 import { bboxModule } from './module.js'
 import { BoundedSessions, LedgerReceiver, LookupFront, MemoryReceiver, parsePrices, termsDocument, type ReceivedPayment } from './paid.js'
@@ -47,6 +48,8 @@ interface Rig {
   env: string
   front: LookupFront
   host: FakeHost
+  /** Signatures the payee's wallet made. */
+  signatures: () => number
 }
 
 const servers: Server[] = []
@@ -55,10 +58,10 @@ after(() => {
 })
 
 /** A module with one envelope, engine and storage, and its terms route on a free port. */
-async function rig(prices: string, sessions?: { max: number; ttlSeconds: number }): Promise<Rig> {
+async function rig(prices: string, sessions?: { max: number; ttlSeconds: number }, budget?: BudgetConfig): Promise<Rig> {
   const host = new FakeHost()
   const chain = new Chain(11000)
-  const m = bboxModule(host, { offices: [office], stateDir: '/nonexistent', retentionDays: 31, maxBEEF: 262144, prices: parsePrices(prices), sessions: { max: 100, ttlSeconds: 600 } }, [topic], new MemoryJournal())
+  const m = bboxModule(host, { offices: [office], stateDir: '/nonexistent', retentionDays: 31, maxBEEF: 262144, prices: parsePrices(prices), sessions: { max: 100, ttlSeconds: 600 }, handshakes: DefaultBudget }, [topic], new MemoryJournal())
   const storage = new MemoryStorage()
   await m.ls.restore([], storage)
   const engine = new Engine(m.module.topics as never, m.module.lookups as never, storage as never, chain.tracker, undefined, [], [], undefined, undefined, { [topic]: false }, false, undefined, undefined, undefined, quietConsole())
@@ -72,10 +75,17 @@ async function rig(prices: string, sessions?: { max: number; ttlSeconds: number 
   const rc = await carrier(fundingTree(client, 1, chain), 0, client, receiptRecord(office, client, [commitment(read)], now))
   for (const x of [open, read, rc]) await engine.submit({ beef: x.toAtomicBEEF(), topics: [topic] })
   const receiver = new MemoryReceiver()
-  const front = new LookupFront({ ls: m.ls, host, prices: parsePrices(prices), wallet: payeeWallet, receiver, headers: chain.tracker, sessions })
+  let signatures = 0
+  const wallet = new ProtoWallet(payee)
+  const sign = wallet.createSignature.bind(wallet)
+  wallet.createSignature = async (args) => {
+    signatures++
+    return await sign(args)
+  }
+  const front = new LookupFront({ ls: m.ls, host, prices: parsePrices(prices), wallet, receiver, headers: chain.tracker, sessions, budget })
   const server = await front.listen(0, '127.0.0.1')
   servers.push(server)
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, server, receiver, wallet: new PayingWallet(client.key, chain), client, chain, env: read.id('hex'), front, host }
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, server, receiver, wallet: new PayingWallet(client.key, chain), client, chain, env: read.id('hex'), front, host, signatures: () => signatures }
 }
 
 const post = (body: unknown, headers: Record<string, string> = {}): { method: string; headers: Record<string, string>; body: string } => ({
@@ -246,7 +256,7 @@ test('the BRC-104 session store is bounded: a cap that forgets the least recentl
 })
 
 test('the terms route keeps at most its bound of sessions; a client whose session went shakes hands again', async () => {
-  const r = await rig('history=5', { max: 2, ttlSeconds: 600 })
+  const r = await rig('history=5', { max: 2, ttlSeconds: 600 }, { perSec: 100, burst: 100, perAddressPerSec: 100, addressBurst: 100 })
   const ask = { service: 'ls_bbox', query: { office, to: r.client.hex } }
   const clients = [0, 1, 2].map(() => new AuthFetch(new ProtoWallet(PrivateKey.fromRandom()) as unknown as WalletInterface))
   for (const c of clients) assert.equal((await c.fetch(`${r.url}/lookup`, post(ask))).status, 200)
@@ -261,4 +271,65 @@ test('the terms route keeps at most its bound of sessions; a client whose sessio
   const again = new AuthFetch(new ProtoWallet(PrivateKey.fromRandom()) as unknown as WalletInterface)
   assert.equal((await again.fetch(`${r.url}/lookup`, post(ask))).status, 200, 'a new handshake is answered')
   assert.equal(r.front.sessions.size, 2)
+})
+
+/** One BRC-104 initial request, raw, from a fresh identity, sent from localAddress. */
+async function shake(url: string, localAddress: string): Promise<{ status: number; retryAfter?: string }> {
+  const body = JSON.stringify({
+    version: '0.1',
+    messageType: 'initialRequest',
+    identityKey: PrivateKey.fromRandom().toPublicKey().toString(),
+    initialNonce: Utils.toBase64(Random(32)),
+    requestedCertificates: { certifiers: [], types: {} },
+  })
+  return await new Promise((resolve, reject) => {
+    const req = request(`${url}/.well-known/auth`, { method: 'POST', localAddress, headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } }, (res) => {
+      res.resume()
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, retryAfter: res.headers['retry-after'] as string | undefined }))
+    })
+    req.on('error', reject)
+    req.end(body)
+  })
+}
+
+test('a handshake flood is refused 429 before any signature; a real client still pays its 402 within the budget', async () => {
+  const r = await rig('history=5', undefined, { perSec: 0.2, burst: 5, perAddressPerSec: 0.1, addressBurst: 2 })
+  // One address floods: its own burst is answered, the rest refused at once.
+  const started = Date.now()
+  const flood = await Promise.all(Array.from({ length: 50 }, () => shake(r.url, '127.0.0.2')))
+  const ok = flood.filter((x) => x.status === 200).length
+  const limited = flood.filter((x) => x.status === 429)
+  assert.equal(ok, 2, 'the address burst')
+  assert.equal(limited.length, 48)
+  assert.ok(limited.every((x) => Number(x.retryAfter) >= 1), 'each refusal says when to come back')
+  assert.equal(r.signatures(), 2, 'one signature per answered handshake, none for a refused one')
+  assert.ok(Date.now() - started < 5000, 'refused cheaply')
+  assert.equal(r.host.count('bbox_handshakes_total', { result: 'accepted' }), 2)
+  assert.equal(r.host.count('bbox_handshakes_total', { result: 'limited_address' }), 48)
+  // Other addresses take the rest of the route's burst, then the route refuses.
+  const others = await Promise.all(['127.0.0.3', '127.0.0.3', '127.0.0.4', '127.0.0.5'].map((a) => shake(r.url, a)))
+  assert.deepEqual(others.map((x) => x.status).sort(), [200, 200, 200, 429])
+  assert.equal(r.host.count('bbox_handshakes_total', { result: 'limited_global' }), 1)
+  // The route refills; a real client from its own address shakes hands
+  // once, is answered 402, pays, and is answered.
+  const wait = Number(others.find((x) => x.status === 429)!.retryAfter)
+  assert.ok(wait >= 1 && wait <= 5)
+  await new Promise((resolve) => setTimeout(resolve, wait * 1000 + 100))
+  const af = new AuthFetch(r.wallet as unknown as WalletInterface)
+  const paid = await quietly(async () => await af.fetch(`${r.url}/lookup`, post({ service: 'ls_bbox', query: { office, history: r.client.hex } })))
+  assert.equal(paid.status, 200)
+  assert.equal(paid.headers.get('x-bsv-payment-satoshis-paid'), '5')
+  assert.deepEqual(txids((await paid.json()) as never), [r.env])
+  assert.equal(r.receiver.payments.length, 1)
+  assert.equal(r.host.count('bbox_handshakes_total', { result: 'accepted' }), 6, 'the client shook hands once')
+  // The route spent that token too: the next handshake waits.
+  assert.equal((await shake(r.url, '127.0.0.6')).status, 429)
+})
+
+test('a malformed handshake inside the budget is counted failed and costs no signature', async () => {
+  const r = await rig('history=5')
+  const bad = await fetch(`${r.url}/.well-known/auth`, post({ messageType: 'general' }))
+  assert.equal(bad.status, 400)
+  assert.equal(r.host.count('bbox_handshakes_total', { result: 'failed' }), 1)
+  assert.equal(r.signatures(), 0)
 })

@@ -71,7 +71,7 @@ environment ([host.md](host.md)); a client cannot change it.
 | Superseded carriers per funding output | 8 (64 once its winner is acknowledged) | spec | Bounds what one funding output can make a host keep | Same |
 | Outpoint rows (`outpoints.jsonl`) | kept for the host's life | none | It is what keeps a funding output from paying for a second answered carrier (spec section 8.2); back it up ([host.md](host.md)) | Same |
 | BRC-104 sessions the terms route keeps (`BBOX_SESSIONS`, `BBOX_SESSION_TTL`) | 10000, each forgotten after 600 s idle | host policy | A handshake is unauthenticated: the store must not grow without end. Past the cap the least recently used goes (`bbox_sessions_evicted_total{why="cap"}`) and its client shakes hands again | Not on the plane |
-| Handshakes and 402s the terms route answers | as fast as the host's process signs (about 10 a second measured on a test host) | host policy: none in the module | The session cap bounds memory, not CPU: each handshake is a signature on the host's own process. A host that prices a question should rate-limit its terms route in front of the module | Not on the plane |
+| BRC-104 handshakes the terms route answers (`BBOX_HANDSHAKES_PER_SEC`, `BBOX_HANDSHAKE_BURST`, `BBOX_HANDSHAKES_PER_ADDR_PER_SEC`, `BBOX_HANDSHAKE_ADDR_BURST`) | 4 a second, 8 at once; per remote address (IPv6 per /64) 1 a second, 4 at once | host policy; over it answered 429 with `Retry-After`, before any signature | The session cap bounds memory, not CPU: each handshake is a signature on the host's own process, which signs about 10 a second on a test host. The defaults leave most of it to the host's own work (`bbox_handshakes_total{result}`) | Not on the plane |
 | Lookup rate a host accepts | host policy | host policy; answers 429 with `Retry-After` | Resolution and lookup are an unauthenticated surface | Same |
 
 ## Where the numbers come from
@@ -138,6 +138,9 @@ host's own process. On a test host a flood of priced questions from fresh
 identities was answered at about 10 a second, and a few of the flooding
 clients timed out waiting; the plane feed into the same host recorded no retry or error meanwhile. The session cap
 holds memory at 10000 sessions whatever the flood; it does not bound the
-work, which is why a host that prices a question should rate-limit the
-route in front of it.
+work. The handshake budget does: a flood past it is answered 429 before
+any signature, at the cost of reading a request line, and an honest client,
+which shakes hands once per session, still pays its 402 and is answered.
+The default of 4 handshakes a second is under half of what the test host
+signed.
 

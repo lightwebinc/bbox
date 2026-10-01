@@ -50,6 +50,10 @@ transaction for the chain (spec section 8.1). The reference host has none.
 | `BBOX_HEADERS_URL` | `OVERLAY_CHAIN_TRACKER_URL` | the header source payments are verified against, in the reference host's `/v1` shape |
 | `BBOX_SESSIONS` | 10000 | the most BRC-104 sessions the terms route keeps. Past it the least recently used is forgotten |
 | `BBOX_SESSION_TTL` | 600 | seconds a BRC-104 session is kept once idle (not used for a request) |
+| `BBOX_HANDSHAKES_PER_SEC` | 4 | BRC-104 handshakes a second the terms route answers (below); decimals allowed |
+| `BBOX_HANDSHAKE_BURST` | 8 | the most handshakes the terms route answers at once |
+| `BBOX_HANDSHAKES_PER_ADDR_PER_SEC` | 1 | handshakes a second one remote address is answered; decimals allowed |
+| `BBOX_HANDSHAKE_ADDR_BURST` | 4 | the most handshakes one remote address is answered at once |
 
 A price needs `BBOX_LISTEN`, `BBOX_PAYEE_KEY` and a header source. Any
 mistake stops the host before its port opens.
@@ -140,6 +144,34 @@ hands again; the SDK's client does that by itself. A flood of handshakes
 therefore costs a host a bounded store and makes honest clients shake hands
 again, never unbounded memory. `bbox_sessions` is the store's size and
 `bbox_sessions_evicted_total{why="cap"|"idle"}` what it forgot.
+
+### The handshake budget
+
+The session bound holds memory, not work: each handshake costs a signature
+on the host's own process, about 10 a second on a test host. So the route
+answers handshakes from a budget, two token buckets checked before the
+request body is read and before any signature work:
+
+- the route's: `BBOX_HANDSHAKES_PER_SEC` a second, up to
+  `BBOX_HANDSHAKE_BURST` at once;
+- each remote address's: `BBOX_HANDSHAKES_PER_ADDR_PER_SEC` a second, up to
+  `BBOX_HANDSHAKE_ADDR_BURST` at once. IPv6 addresses share a bucket per
+  /64; an IPv4-mapped address is its IPv4 address.
+
+An address's bucket is checked first, so one address that floods spends its
+own budget, not the route's. A handshake over either is answered 429 with
+`Retry-After` (seconds) and `ERR_RATE_LIMITED`, and takes nothing from
+either bucket. The defaults, 4 a second and 1 per address, leave most of
+the process to the host's own work; an honest client shakes hands once per
+session, so the budget is far above what clients need. The address is the
+connection's: behind a reverse proxy every client shares the proxy's
+address, so raise the per-address limit to the route's, or limit at the
+proxy instead. `bbox_handshakes_total{result}` counts every handshake:
+`accepted`, `failed` (malformed or not verified), `limited_address`,
+`limited_global`.
+
+Requests inside a session are not budgeted: each signed answer is a
+signature too, but only for a client that already shook hands.
 
 ## Settling payments
 
@@ -241,6 +273,7 @@ changes nothing.
 | `bbox_payments_total` | `result` | `requested` (a 402), `accepted`, `refused`, `replayed` |
 | `bbox_sessions` | | BRC-104 sessions the terms route keeps |
 | `bbox_sessions_evicted_total` | `why` | sessions forgotten: `cap`, `idle` |
+| `bbox_handshakes_total` | `result` | BRC-104 handshakes at the terms route: `accepted`, `failed`, `limited_address`, `limited_global` (over the budget, answered 429) |
 | `bbox_offices`, `bbox_envelopes`, `bbox_receipts`, `bbox_sweeps`, `bbox_outpoint_rows` | | gauges of what the index holds |
 
 Counters and gauges count different things. A `_total` counter counts

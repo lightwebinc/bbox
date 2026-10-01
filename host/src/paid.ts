@@ -37,6 +37,7 @@ import {
   type WalletInterface,
 } from '@bsv/sdk'
 import type { ModuleHost } from '@lightwebinc/bcommon'
+import { DefaultBudget, HandshakeBudget, type BudgetConfig } from './budget.js'
 import { LookupService as ServiceName } from './boxrec.js'
 import type { BboxLookupService } from './ls_bbox.js'
 import { PaymentProtocol } from './payment.js'
@@ -458,13 +459,20 @@ export interface FrontOptions {
   headers?: ChainTracker
   /** The bound on BRC-104 sessions: the most kept, and how long one idle is kept. */
   sessions?: { max: number; ttlSeconds: number }
+  /** The handshake budget (budget.ts); DefaultBudget when unset. */
+  budget?: BudgetConfig
 }
+
+/** bbox_handshakes_total's results. */
+export const HandshakeResults = ['accepted', 'failed', 'limited_address', 'limited_global'] as const
 
 export class LookupFront {
   private readonly peer: Peer | undefined
   private readonly transport = new ServerTransport()
   /** The BRC-104 sessions the route keeps. */
   readonly sessions: BoundedSessions
+  /** What handshakes the route answers. */
+  readonly budget: HandshakeBudget
 
   constructor(private readonly o: FrontOptions) {
     for (const [name, price] of o.prices) {
@@ -475,6 +483,8 @@ export class LookupFront {
     const bound = o.sessions ?? { max: DefaultMaxSessions, ttlSeconds: DefaultSessionTTL }
     this.sessions = new BoundedSessions(bound.max, bound.ttlSeconds * 1000, Date.now, (why) => o.host.metrics.inc('bbox_sessions_evicted_total', { why }))
     o.host.metrics.gauge('bbox_sessions', () => this.sessions.size)
+    this.budget = new HandshakeBudget(o.budget ?? DefaultBudget)
+    for (const result of HandshakeResults) o.host.metrics.preset('bbox_handshakes_total', { result })
     if (o.wallet !== undefined) this.peer = new Peer(o.wallet as WalletInterface, this.transport, undefined, this.sessions as never, false)
   }
 
@@ -501,6 +511,16 @@ export class LookupFront {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const handshake = req.method === 'POST' && new URL(req.url ?? '/', 'http://front').pathname === '/.well-known/auth'
+    if (handshake && this.peer !== undefined) {
+      // Before the body is read and before any signature work.
+      const v = this.budget.take(req.socket.remoteAddress ?? '')
+      if (!v.ok) {
+        this.o.host.metrics.inc('bbox_handshakes_total', { result: `limited_${v.limit}` })
+        send(res, json(429, { status: 'error', code: 'ERR_RATE_LIMITED', description: 'too many handshakes; try again later' }, { 'retry-after': String(v.retryAfter) }))
+        return
+      }
+    }
     let body: Uint8Array
     try {
       body = await readBody(req)
@@ -510,8 +530,9 @@ export class LookupFront {
     }
     const url = new URL(req.url ?? '/', 'http://front')
     const method = req.method ?? 'GET'
-    if (url.pathname === '/.well-known/auth' && method === 'POST') {
-      await this.handshake(res, body)
+    if (handshake) {
+      const status = await this.handshake(res, body)
+      if (this.peer !== undefined) this.o.host.metrics.inc('bbox_handshakes_total', { result: status === 200 ? 'accepted' : 'failed' })
       return
     }
     const requestId = header(req.headers, 'x-bsv-auth-request-id')
@@ -526,21 +547,22 @@ export class LookupFront {
     await this.authenticated(req, res, method, url, body, requestId)
   }
 
-  private async handshake(res: ServerResponse, body: Uint8Array): Promise<void> {
+  /** Answers a handshake; resolves with the status answered. */
+  private async handshake(res: ServerResponse, body: Uint8Array): Promise<number> {
     if (this.peer === undefined) {
       send(res, failure(404, 'ERR_NOT_FOUND', 'this host offers no BRC-104 authentication'))
-      return
+      return 404
     }
     let m: AuthMessage
     try {
       m = normalizeBRC100ByteFields(JSON.parse(new TextDecoder().decode(body)), ['payload', 'signature']) as AuthMessage
     } catch {
       send(res, failure(400, 'ERR_AUTH_MALFORMED', 'the handshake is not JSON'))
-      return
+      return 400
     }
     if (m.messageType !== 'initialRequest' || typeof m.initialNonce !== 'string') {
       send(res, failure(400, 'ERR_AUTH_MALFORMED', 'only an initial request is accepted here'))
-      return
+      return 400
     }
     const key = `h:${m.initialNonce}`
     const reply = this.transport.expect(key)
@@ -550,7 +572,7 @@ export class LookupFront {
       this.transport.forget(key)
       reply.catch(() => {})
       send(res, failure(401, 'ERR_AUTH_FAILED', String((e as Error).message)))
-      return
+      return 401
     }
     const r = await reply
     const headers: Record<string, string> = {
@@ -562,6 +584,7 @@ export class LookupFront {
     if (r.yourNonce !== undefined) headers['x-bsv-auth-your-nonce'] = r.yourNonce
     if (r.signature !== undefined) headers['x-bsv-auth-signature'] = Utils.toHex(r.signature)
     send(res, { status: 200, headers, body: text.encode(stringifyBRC100(r)) })
+    return 200
   }
 
   private async authenticated(req: IncomingMessage, res: ServerResponse, method: string, url: URL, body: Uint8Array, requestId: string): Promise<void> {
