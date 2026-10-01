@@ -67,6 +67,40 @@ mistake stops the host before its port opens.
   satoshis and the class. The route answers once the line is on disk. It
   does not broadcast the payment: see [Settling payments](#settling-payments).
 
+### Backing it up
+
+Both files are append-only, so a copy taken while the host runs is safe:
+at worst its last line is cut short, and both readers skip such a line.
+`outpoints.jsonl` is the file that matters: a host that loses it can answer
+a second carrier on a funding output whose first it already answered, and
+nothing else holds it. Copy the whole directory once a day beside the
+database backup, and keep several days:
+
+```sh
+#!/bin/sh
+# /usr/local/sbin/bbox-state-backup: a dated copy of the state directory,
+# the last 7 kept.
+set -eu
+src=/var/lib/bbox
+dst=/var/backups/bbox-state
+install -d -m 0700 "$dst"
+tar -C "$(dirname "$src")" -czf "$dst/bbox-state-$(date -u +%Y%m%d).tar.gz.tmp" "$(basename "$src")"
+mv "$dst/bbox-state-$(date -u +%Y%m%d).tar.gz.tmp" "$dst/bbox-state-$(date -u +%Y%m%d).tar.gz"
+ls -1 "$dst"/bbox-state-*.tar.gz | sort | head -n -7 | xargs -r rm -f
+```
+
+Run it daily, from a systemd timer (`OnCalendar=daily`, `Persistent=true`)
+or cron, as a user that can read the directory (it is mode 0700). The
+copies hold `payments.jsonl`, which is money until it is settled: keep them
+as private as the directory.
+
+To restore, stop the host, unpack the newest copy over `BBOX_STATE_DIR`,
+and start it. Rows written after the copy are lost. On start the module
+writes again the row of every carrier and sweep its storage still holds,
+but a carrier dropped after the copy is no longer in storage, so its row is
+gone and its funding output could answer a second carrier. Restore only
+when the file is lost or damaged, never to roll the host back.
+
 ## The terms route
 
 With `BBOX_LISTEN` set, the module serves, beside the host:
@@ -137,11 +171,20 @@ checks that output 0 pays the key the home derives for the prefix, the
 suffix and the payer, verifies it against the home's headers, broadcasts it
 through the home's settlement leg, waits for its proof, adds it to the
 home's pool, and records its txid in the home as settled. It needs the
-home's `header_url`, `asset` and `settle` ([usage.md](usage.md)). A payment
-the network refuses, because the payer spent its inputs elsewhere, is
-reported, left unsettled, and makes the command exit 1. Running it again is
-safe: what is settled is skipped, and the pool refuses an outpoint twice.
-A BRC-100 wallet holding the payee key can settle the same lines itself.
+home's `header_url`, `asset` and `settle` ([usage.md](usage.md)). Every
+payment is broadcast before any is waited for, so a run takes about one
+block however many lines it settles; `-in-flight` (default 16, at most 64)
+bounds how many are broadcast and not yet mined at once.
+
+A payment the network refuses, because the payer spent its inputs
+elsewhere, is reported as `payment <txid> (<sats> sat, <class>): NOT
+SETTLED: ...` with the settlement leg's reason, left unsettled, and makes
+the command exit 1. Nothing recovers it: the question it paid for was
+answered, and the payee has nothing. That is the price of the window
+between answering and settling, and why the window should be short.
+Running settle again is safe: what is settled is skipped, and the pool
+refuses an outpoint twice. A BRC-100 wallet holding the payee key can
+settle the same lines itself.
 
 ## Retention and restore
 
@@ -167,15 +210,28 @@ changes nothing.
 
 | Name | Labels | Meaning |
 | --- | --- | --- |
-| `bbox_admitted_total` | `kind` | transactions admitted: `envelope`, `receipt`, `sweep`, `spend` |
+| `bbox_admitted_total` | `kind` | distinct transactions admitted since the host started: `envelope`, `receipt`, `sweep`, `spend` |
+| `bbox_admitted_repeats_total` | `kind` | admissions of a transaction already counted, which the engine lets through only when two submissions of it race (below) |
 | `bbox_refused_total` | `reason` | submissions refused, by the reason of spec sections 3.1, 4.6, 5 and 8.1 |
 | `bbox_dropped_total` | `why` | carriers and sweeps dropped: `evidence`, `retention` |
-| `bbox_retractions_total` | | outpoints recorded as swept |
+| `bbox_retractions_total` | | outpoints recorded as swept, the fee input of each sweep included (a sweep of one funding output counts 2) |
 | `bbox_lookups_total` | `class` | questions answered |
 | `bbox_payments_total` | `result` | `requested` (a 402), `accepted`, `refused`, `replayed` |
 | `bbox_sessions` | | BRC-104 sessions the terms route keeps |
 | `bbox_sessions_evicted_total` | `why` | sessions forgotten: `cap`, `idle` |
 | `bbox_offices`, `bbox_envelopes`, `bbox_receipts`, `bbox_sweeps`, `bbox_outpoint_rows` | | gauges of what the index holds |
+
+Counters and gauges count different things. A `_total` counter counts
+events since this process started and starts again at 0 on a restart; a
+gauge is what the index holds now, restored on start and lowered by
+retention. So `bbox_admitted_total{kind="sweep"}` and `bbox_sweeps` agree
+only on a host that has not restarted or dropped anything since the sweeps
+arrived. In mode plane a client sends a sweep to the facade and then
+directly to every host it names, so a host on the plane may be offered the
+same sweep twice within a second; when both submissions pass the engine's
+duplicate check before either is applied, the manager sees it twice. The
+second is counted in `bbox_admitted_repeats_total`, not again in
+`bbox_admitted_total`. A manager remembers the last 4096 txids it counted.
 
 The engine checks a submission's scripts and proofs before any topic
 manager runs, and the SDK's interpreter itself refuses a high-S input

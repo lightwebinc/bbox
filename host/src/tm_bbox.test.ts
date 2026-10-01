@@ -46,7 +46,10 @@ test('every transaction vector is admitted or refused, raising, as the vectors s
   }
   assert.equal(admitted + refused, v.transactions.length)
   assert.ok(admitted >= 9 && refused >= 45, `${admitted} admitted, ${refused} refused`)
-  assert.equal(host.count('bbox_admitted_total', { kind: 'envelope' }), 5)
+  // Five envelope admissions, one of them a txid admitted before in
+  // another BEEF: counted once, and once as a repeat.
+  assert.equal(host.count('bbox_admitted_total', { kind: 'envelope' }), 4)
+  assert.equal(host.count('bbox_admitted_repeats_total', { kind: 'envelope' }), 1)
   assert.equal(host.count('bbox_admitted_total', { kind: 'sweep' }), 2)
   assert.equal(host.count('bbox_refused_total', { reason: 'unlock' }), 6)
 })
@@ -114,4 +117,14 @@ test('the manager needs no inputs and documents itself', async () => {
   assert.deepEqual(await tm.getMetaData(), { name: v.topic, shortDescription: `Admits the bbox office ${v.office}.` })
   assert.throws(() => new BboxTopicManager('tm_log_x_abcdefghij', new FakeHost()))
   assert.throws(() => new BboxTopicManager(v.topic, new FakeHost(), undefined, 1000))
+})
+
+test('an admission is counted once per transaction; a repeat the engine lets through is counted apart', async () => {
+  const host = new FakeHost()
+  const tm = new BboxTopicManager(v.topic, host, tracker(v.headers))
+  const sweep = v.transactions.find((t) => t.verdict === 'admit' && t.name.includes('sweep'))
+  assert.ok(sweep !== undefined, 'a sweep vector')
+  for (let i = 0; i < 3; i++) await verdict(tm, beefOf(sweep), heldOf(sweep))
+  assert.equal(host.count('bbox_admitted_total', { kind: 'sweep' }), 1)
+  assert.equal(host.count('bbox_admitted_repeats_total', { kind: 'sweep' }), 2)
 })

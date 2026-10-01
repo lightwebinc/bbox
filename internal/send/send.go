@@ -226,7 +226,10 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 	e.payer.Tip = h.Height
 	CollectChange(ctx, e.Pool, e.Legs.Asset)
-	if err := e.FinishSweep(ctx); err != nil {
+	var refusedErr *SweepRefusedError
+	if err := e.FinishSweep(ctx); errors.As(err, &refusedErr) {
+		e.note("%v", err)
+	} else if err != nil {
 		return err
 	}
 	return e.Resume(ctx)

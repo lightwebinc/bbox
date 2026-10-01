@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -381,10 +382,14 @@ func TestDropAgainFinishesTheSweepInFlight(t *testing.T) {
 	bob := h.identity("bob")
 	h.newOffice("bob")
 	gone := h.send("alice", bob, "take back")
-	h.chain.Refuse = func(*transaction.Transaction) string { return "busy" }
+	h.chain.Busy = func(*transaction.Transaction) bool { return true }
 	h.want(h.run("alice", "", "drop", gone), exitUsage, "it is persisted; the next drop sends it again")
-	h.chain.Refuse = nil
-	r := h.must("alice", "", "drop", gone)
+	r := h.must("alice", "", "doctor")
+	if !strings.Contains(r.stdout, "in flight") || strings.Contains(r.stdout, "FAILED") {
+		t.Fatalf("a transient failure must leave the sweep in flight:\n%s", r.stdout)
+	}
+	h.chain.Busy = nil
+	r = h.must("alice", "", "drop", gone)
 	if !strings.Contains(r.stdout, "retracted 1 funding output(s)") || strings.Count(r.stdout, "retracted ") != 1 {
 		t.Fatalf("drop again:\n%s\n%s", r.stdout, r.stderr)
 	}
@@ -396,5 +401,200 @@ func TestDropAgainFinishesTheSweepInFlight(t *testing.T) {
 	r = h.must("alice", "", "doctor")
 	if strings.Contains(r.stdout, "in flight") || !strings.Contains(r.stdout, "1 sweep(s)") {
 		t.Fatalf("doctor:\n%s", r.stdout)
+	}
+}
+
+// A sweep the network refuses is marked failed, its fee coin goes back to
+// the pool, and it no longer blocks the next drop, which builds a new
+// sweep and retracts. Through a node's RPC and through arcade.
+func TestRefusedSweepFailsAndFreesTheNextDrop(t *testing.T) {
+	t.Parallel()
+	for _, leg := range []string{"rpc", "arcade"} {
+		t.Run(leg, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			if leg == "arcade" {
+				h.env["BBOX_SETTLE"] = "arcade:" + h.chainS.URL + "/arcade"
+			}
+			h.identity("alice")
+			bob := h.identity("bob")
+			h.newOffice("bob")
+			gone := h.send("alice", bob, "take back")
+			pool := regexp.MustCompile(`pool        (\d+) output\(s\), (\d+) sat`)
+			before := pool.FindStringSubmatch(h.must("alice", "", "doctor").stdout)
+			h.chain.Refuse = func(*transaction.Transaction) string { return "mandatory-script-verify-flag-failed" }
+			h.want(h.run("alice", "", "drop", gone), exitRefused, "refused by the network")
+			h.chain.Refuse = nil
+			r := h.must("alice", "", "doctor")
+			if !strings.Contains(r.stdout, "FAILED") || strings.Contains(r.stdout, "in flight") {
+				t.Fatalf("doctor after the refusal:\n%s", r.stdout)
+			}
+			if after := pool.FindStringSubmatch(r.stdout); before == nil || after == nil || after[2] != before[2] {
+				t.Fatalf("the fee coin is not back in the pool: before %v, after %v\n%s", before, after, r.stdout)
+			}
+			for _, host := range []*testchain.Host{h.a, h.b} {
+				if host.Status(gone) == "retracted" {
+					t.Fatal("a refused sweep retracted the envelope")
+				}
+			}
+			// A later drop proceeds: a new sweep of the same output.
+			r = h.must("alice", "", "drop", gone)
+			if !strings.Contains(r.stdout, "retracted 1 funding output(s)") {
+				t.Fatalf("drop after the refusal:\n%s\n%s", r.stdout, r.stderr)
+			}
+			for _, host := range []*testchain.Host{h.a, h.b} {
+				if host.Status(gone) != "retracted" {
+					t.Fatalf("status %s", host.Status(gone))
+				}
+			}
+			r = h.must("alice", "", "doctor")
+			if strings.Contains(r.stdout, "in flight") || !strings.Contains(r.stdout, "2 sweep(s)") {
+				t.Fatalf("doctor:\n%s", r.stdout)
+			}
+		})
+	}
+}
+
+// A leg that answers nothing (the tcp ingress) cannot say a sweep was
+// refused; the node's view of its inputs can. An input spent by another
+// transaction fails the sweep before any wait for a block.
+func TestSweepWithAnInputSpentElsewhereFails(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	h.chain.Ingress(l)
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	gone := h.send("alice", bob, "take back")
+	raw, err := os.ReadFile(filepath.Join(h.dir, "alice", "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st struct {
+		Sent []struct {
+			Txid string `json:"txid"`
+			Tree string `json:"tree"`
+			Vout uint32 `json:"vout"`
+		} `json:"sent"`
+	}
+	if err := json.Unmarshal(raw, &st); err != nil || len(st.Sent) != 1 || st.Sent[0].Txid != gone {
+		t.Fatalf("state: %v %+v", err, st)
+	}
+	other := strings.Repeat("ab", 32)
+	h.chain.SpendElsewhere(st.Sent[0].Tree, st.Sent[0].Vout, other)
+	h.env["BBOX_SETTLE"] = "tcp:" + l.Addr().String()
+	h.want(h.run("alice", "", "drop", gone), exitRefused, "is spent by "+other)
+	if n := h.chain.IngressRefused(); n != 1 {
+		t.Fatalf("the ingress refused %d submission(s), want the sweep", n)
+	}
+	r := h.must("alice", "", "doctor")
+	if !strings.Contains(r.stdout, "FAILED") || strings.Contains(r.stdout, "in flight") {
+		t.Fatalf("doctor:\n%s", r.stdout)
+	}
+}
+
+// payee settle broadcasts every payment before it waits for any, so the
+// run takes one block, not one a payment; -in-flight bounds how many are
+// broadcast and not yet mined at once.
+func TestSettleBroadcastsThenWaitsTogether(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		inFlight string
+		most     int
+	}{{"16", 3}, {"1", 1}} {
+		t.Run("in-flight "+c.inFlight, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.identity("bob")
+			h.identity("payee")
+			h.newOffice("bob")
+			h.startPaid(t, "payee", 7)
+			h.must("bob", "", "fund", "-blocks", "4")
+			for range 3 {
+				h.must("bob", "", "history")
+			}
+			if len(h.paid.Payments) != 3 {
+				t.Fatalf("payments %d", len(h.paid.Payments))
+			}
+			ledger := filepath.Join(h.dir, "payments.jsonl")
+			if err := os.WriteFile(ledger, h.paid.Ledger(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			h.chain.SetHold(true)
+			done := make(chan result, 1)
+			go func() { done <- h.run("payee", "", "payee", "settle", ledger, "-in-flight", c.inFlight) }()
+			deadline := time.After(30 * time.Second)
+			most := 0
+			for {
+				select {
+				case r := <-done:
+					if r.code != 0 || !strings.Contains(r.stdout, "3 payment(s) settled, 21 sat") {
+						t.Fatalf("settle: exit %d\n%s\n%s", r.code, r.stdout, r.stderr)
+					}
+					if most != c.most {
+						t.Fatalf("at most %d payment(s) were broadcast and unmined at once, want %d", most, c.most)
+					}
+					return
+				case <-deadline:
+					t.Fatalf("settle did not finish; at most %d broadcast at once", most)
+				case <-time.After(20 * time.Millisecond):
+				}
+				n := h.chain.Waiting()
+				most = max(most, n)
+				if n > c.most {
+					t.Fatalf("%d payments broadcast and unmined, more than %d", n, c.most)
+				}
+				// Mine only once as many as may be are waiting: settling one
+				// a block would never get there.
+				if n == c.most || (n > 0 && n == 3-len(h.minedPayments())) {
+					time.Sleep(100 * time.Millisecond)
+					h.chain.Mine()
+				}
+			}
+		})
+	}
+}
+
+func (h *harness) minedPayments() []string {
+	var out []string
+	for _, p := range h.paid.Payments {
+		if h.chain.Mined(p.Txid) {
+			out = append(out, p.Txid)
+		}
+	}
+	return out
+}
+
+// An envelope that reached one host only: a reader sees the hosts
+// disagree, and list -fill copies it across, after which they agree.
+func TestListFillCopiesAMissingEnvelopeAcross(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	h.env["BBOX_MODE"] = "unicast"
+	delete(h.env, "BBOX_FACADE")
+	r := h.must("alice", "", "-hosts", h.aS.URL, "send", bob, "-m", "only at a")
+	tx := regexp.MustCompile(`(?m)^sent    ([0-9a-f]{64})`).FindStringSubmatch(r.stdout)
+	if tx == nil {
+		t.Fatalf("send:\n%s", r.stdout)
+	}
+	if !h.a.Holds(tx[1]) || h.b.Holds(tx[1]) {
+		t.Fatal("the envelope must be at a only")
+	}
+	h.want(h.run("bob", "", "list"), exitIncomplete, "host "+h.bS.URL+": DISAGREES")
+	r = h.must("bob", "", "list", "-fill")
+	if !strings.Contains(r.stdout, "host "+h.bS.URL+": filled 1 of 1 envelope(s) it lacked") || !h.b.Holds(tx[1]) {
+		t.Fatalf("list -fill:\n%s\n%s", r.stdout, r.stderr)
+	}
+	r = h.must("bob", "", "list")
+	if !strings.Contains(r.stdout, tx[1]) || strings.Contains(r.stderr, "DISAGREES") {
+		t.Fatalf("list after fill:\n%s\n%s", r.stdout, r.stderr)
 	}
 }

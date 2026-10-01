@@ -21,6 +21,7 @@ import (
 	"slices"
 	"syscall"
 
+	"github.com/lightwebinc/bcommon/bwallet"
 	"github.com/lightwebinc/bcommon/funding"
 )
 
@@ -139,6 +140,13 @@ type Sweep struct {
 	Submitted bool   `json:"submitted,omitempty"`
 	// Done is set once it is mined and handed to the outbox.
 	Done bool `json:"done,omitempty"`
+	// Fee is the pool coin that pays its fee, as the pool held it, so a
+	// sweep the network refuses can give it back.
+	Fee *bwallet.Output `json:"fee,omitempty"`
+	// Failed is why the network refused it, once it did: it is no longer
+	// in flight, retracts nothing, and the outputs it named may be swept
+	// again.
+	Failed string `json:"failed,omitempty"`
 }
 
 // Received is an envelope to this identity it has read.
@@ -246,10 +254,11 @@ func (s *State) Done(txid string) {
 	s.Outbox = slices.DeleteFunc(s.Outbox, func(p Pending) bool { return p.Txid == txid })
 }
 
-// InFlight is the sweep built and not yet finished, if there is one.
+// InFlight is the sweep built and not yet finished, if there is one. A
+// sweep the network refused is finished: it failed.
 func (s *State) InFlight() *Sweep {
 	for i := range s.Sweeps {
-		if !s.Sweeps[i].Done {
+		if !s.Sweeps[i].Done && s.Sweeps[i].Failed == "" {
 			return &s.Sweeps[i]
 		}
 	}

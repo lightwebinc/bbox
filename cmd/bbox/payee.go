@@ -12,17 +12,19 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
 	"github.com/lightwebinc/bcommon/termsafe"
 
+	"github.com/lightwebinc/bbox/internal/limits"
 	"github.com/lightwebinc/bbox/internal/purse"
 )
 
 const payeeHelp = `usage: bbox payee key -out FILE
-       bbox payee settle <payments.jsonl>
+       bbox payee settle <payments.jsonl> [-in-flight N]
 
 A host that prices a question is paid to its payee key (BBOX_PAYEE_KEY):
 each payment is a BRC-29 output to a key derived from it, recorded by the
@@ -38,14 +40,17 @@ settle takes every payment in the ledger that this home has not settled
 into the home's wallet: each is checked to pay the key this identity
 derives for its remittance and payer, verified against the headers,
 broadcast through the settlement leg, waited for until it mines, and added
-to the pool, and its txid is recorded in the home as settled. A payment the
-network refuses (its inputs spent elsewhere) is reported and left
-unsettled. Run it on a schedule: the sooner a payment is settled, the
+to the pool, and its txid is recorded in the home as settled. Every
+payment is broadcast before any is waited for, so a run takes about one
+block however many there are; -in-flight (default 16, at most 64) bounds
+how many are broadcast and not yet mined at once. A payment the network
+refuses (its inputs spent elsewhere) is reported and left unsettled. Run it on a schedule: the sooner a payment is settled, the
 shorter the window in which the payer can take it back.`
 
 func cmdPayee(ctx context.Context, g *global, args []string) error {
 	fs := g.flagSet("payee", payeeHelp)
 	out := fs.String("out", "", "key: the file to write BBOX_PAYEE_KEY to")
+	inFlight := fs.Int("in-flight", limits.DefaultSettleInFlight, "settle: the most payments broadcast and not yet mined at once")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -54,7 +59,10 @@ func cmdPayee(ctx context.Context, g *global, args []string) error {
 	case len(pos) == 1 && pos[0] == "key":
 		return payeeKey(g, *out)
 	case len(pos) == 2 && pos[0] == "settle":
-		return payeeSettle(ctx, g, pos[1])
+		if *inFlight < 1 || *inFlight > limits.MaxSettleInFlight {
+			return usage("-in-flight %d is outside 1 to %d: payments broadcast and not yet mined at once (docs/limits.md)", *inFlight, limits.MaxSettleInFlight)
+		}
+		return payeeSettle(ctx, g, pos[1], *inFlight)
 	}
 	return usage("payee key -out FILE | payee settle <payments.jsonl>")
 }
@@ -115,7 +123,7 @@ type ledgerLine struct {
 }
 
 // payeeSettle internalizes every payment in the ledger this home has not.
-func payeeSettle(ctx context.Context, g *global, path string) error {
+func payeeSettle(ctx context.Context, g *global, path string, inFlight int) error {
 	f, err := os.Open(path) //nolint:gosec // the operator's own path
 	if err != nil {
 		return err
@@ -157,23 +165,70 @@ func payeeSettle(ctx context.Context, g *global, path string) error {
 	}
 	var settled, already, failed int
 	var sats uint64
+	notSettled := func(l ledgerLine, err error) {
+		failed++
+		g.say("payment %s (%d sat, %s): NOT SETTLED: %v", l.Txid, l.Satoshis, termsafe.Text(l.Class), err)
+	}
+	// Every payment is checked first, then broadcast, and the proofs are
+	// awaited together: at most inFlight are broadcast and not yet mined
+	// at once, so a run takes about one block, not one block a payment.
+	type job struct {
+		l  ledgerLine
+		in *purse.Incoming
+	}
+	var jobs []job
 	for _, l := range lines {
 		if slices.Contains(h.st.Settled, l.Txid) {
 			already++
 			continue
 		}
-		if err := settleOne(ctx, g, p, l); err != nil {
-			failed++
-			g.say("payment %s (%d sat, %s): NOT SETTLED: %v", l.Txid, l.Satoshis, termsafe.Text(l.Class), err)
+		in, err := checkPayment(ctx, g, p, l)
+		if err != nil {
+			notSettled(l, err)
 			continue
 		}
-		h.st.Settled = append(h.st.Settled, l.Txid)
+		jobs = append(jobs, job{l, in})
+	}
+	type result struct {
+		job
+		err error
+	}
+	results := make(chan result)
+	sem := make(chan struct{}, inFlight)
+	go func() {
+		var wg sync.WaitGroup
+		for _, j := range jobs {
+			sem <- struct{}{}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				err := p.Broadcast(ctx, j.in)
+				if err == nil {
+					err = p.Await(ctx, j.in)
+				}
+				results <- result{j, err}
+			}()
+		}
+		wg.Wait()
+		close(results)
+	}()
+	for r := range results {
+		err := r.err
+		if err == nil {
+			err = p.Take(r.in)
+		}
+		if err != nil {
+			notSettled(r.l, err)
+			continue
+		}
+		h.st.Settled = append(h.st.Settled, r.l.Txid)
 		if err := h.st.Save(); err != nil {
 			return err
 		}
 		settled++
-		sats += l.Satoshis
-		fmt.Fprintf(g.stdout, "settled %s: %d sat for %s from %s\n", l.Txid, l.Satoshis, termsafe.Text(l.Class), termsafe.Abbrev(l.SenderIdentityKey))
+		sats += r.l.Satoshis
+		fmt.Fprintf(g.stdout, "settled %s: %d sat for %s from %s\n", r.l.Txid, r.l.Satoshis, termsafe.Text(r.l.Class), termsafe.Abbrev(r.l.SenderIdentityKey))
 	}
 	fmt.Fprintf(g.stdout, "%d payment(s) settled, %d sat; %d settled before; %d not settled; pool %d output(s), %d sat\n",
 		settled, sats, already, failed, h.e.Pool.Count(), h.e.Pool.Balance())
@@ -183,17 +238,23 @@ func payeeSettle(ctx context.Context, g *global, path string) error {
 	return nil
 }
 
-func settleOne(ctx context.Context, g *global, p *purse.Purse, l ledgerLine) error {
+func checkPayment(ctx context.Context, g *global, p *purse.Purse, l ledgerLine) (*purse.Incoming, error) {
 	beef, err := base64.StdEncoding.DecodeString(l.Beef)
 	if err != nil {
-		return fmt.Errorf("the ledger's BEEF is not base64: %w", err)
+		return nil, fmt.Errorf("the ledger's BEEF is not base64: %w", err)
 	}
 	r, err := purse.Remittance(l.DerivationPrefix, l.DerivationSuffix, l.SenderIdentityKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = p.InternalizeAction(ctx, wallet.InternalizeActionArgs{Tx: beef, Description: "bbox priced question " + l.Class,
+	in, err := p.Check(ctx, wallet.InternalizeActionArgs{Tx: beef, Description: "bbox priced question " + l.Class,
 		Labels: []string{"bbox", "payee"}, Outputs: []wallet.InternalizeOutput{{OutputIndex: l.OutputIndex,
-			Protocol: wallet.InternalizeProtocolWalletPayment, PaymentRemittance: r}}}, g.cfg.Originator)
-	return err
+			Protocol: wallet.InternalizeProtocolWalletPayment, PaymentRemittance: r}}})
+	if err != nil {
+		return nil, err
+	}
+	if in.Txid != l.Txid {
+		return nil, fmt.Errorf("the ledger names %s and its BEEF holds %s", l.Txid, in.Txid)
+	}
+	return in, nil
 }

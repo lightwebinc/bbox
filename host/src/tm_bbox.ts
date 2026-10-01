@@ -19,6 +19,7 @@ import type { AdmittanceInstructions, ModuleHost, TopicManager } from '@lightweb
 import { admit, type TxKind } from './admit.js'
 import { DefaultMaxBEEF } from './beef.js'
 import { Refusal, TopicPrefix, checkOffice, type Reason } from './boxrec.js'
+import { toHex } from './util.js'
 
 /**
  * Every label a host counts a refused submission by (spec sections 3.1, 4.6,
@@ -51,6 +52,9 @@ export const Reasons: readonly Reason[] = [
   'unmined',
   'not-bbox',
 ]
+
+/** How many admitted txids a manager remembers to count each once. */
+export const RecentAdmissions = 4096
 
 /** What an admitted transaction was. */
 export const AdmitKinds: readonly TxKind[] = ['envelope', 'receipt', 'sweep', 'spend']
@@ -99,7 +103,7 @@ export class BboxTopicManager implements TopicManager {
   async identifyAdmissibleOutputs(beef: number[], previousCoins: number[]): Promise<AdmittanceInstructions> {
     try {
       const a = await admit(beef, previousCoins, { office: this.office, headers: this.headers, maxBEEF: this.maxBEEF })
-      this.host.metrics.inc('bbox_admitted_total', { kind: a.kind })
+      this.count(a.kind, toHex(a.txid))
       return { outputsToAdmit: a.outputs, coinsToRetain: a.retain }
     } catch (e) {
       if (!(e instanceof Refusal)) throw e
@@ -108,6 +112,26 @@ export class BboxTopicManager implements TopicManager {
       throw new Refused(e.reason, e.message.replace(/^boxrec: /, ''))
     }
   }
+
+  /**
+   * Counts an admission once per transaction. The engine shows a manager a
+   * txid it already applied only when two submissions of it race past its
+   * duplicate check (in the lab: a sweep a client sends to the facade and
+   * then directly to the same host), so `bbox_admitted_total` counts
+   * distinct transactions and `bbox_admitted_repeats_total` the rest.
+   * The memory is the last RecentAdmissions txids.
+   */
+  private count(kind: TxKind, txid: string): void {
+    if (this.recent.has(txid)) {
+      this.host.metrics.inc('bbox_admitted_repeats_total', { kind })
+      return
+    }
+    this.recent.add(txid)
+    if (this.recent.size > RecentAdmissions) this.recent.delete(this.recent.values().next().value as string)
+    this.host.metrics.inc('bbox_admitted_total', { kind })
+  }
+
+  private readonly recent = new Set<string>()
 
   /** Nothing is needed: a carrier carries its funding tree, and a sweep names what it spends. */
   async identifyNeededInputs(): Promise<Array<{ txid: string; outputIndex: number }>> {

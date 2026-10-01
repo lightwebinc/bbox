@@ -57,8 +57,12 @@ func TestTheHomeLockIsExclusive(t *testing.T) {
 }
 
 func TestInFlight(t *testing.T) {
-	s := &State{Sweeps: []Sweep{{Txid: "a", Done: true}, {Txid: "b"}}}
+	s := &State{Sweeps: []Sweep{{Txid: "a", Done: true}, {Txid: "f", Failed: "refused"}, {Txid: "b"}}}
 	if sw := s.InFlight(); sw == nil || sw.Txid != "b" {
 		t.Fatalf("%+v", sw)
+	}
+	s.Sweeps[2].Failed = "refused"
+	if sw := s.InFlight(); sw != nil {
+		t.Fatalf("a failed sweep is in flight: %+v", sw)
 	}
 }

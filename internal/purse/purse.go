@@ -26,6 +26,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -155,7 +156,40 @@ func (p *Purse) Refund() {
 // settlement leg (a transaction the network already holds is not an
 // error) and its proof awaited, then the outputs are pooled with their
 // derivation. A basket insertion is refused: this wallet has one basket.
+//
+// It is Check, Broadcast, Await and Take in turn; a caller settling many
+// payments runs those halves itself, so it can broadcast them all before
+// it waits.
 func (p *Purse) InternalizeAction(ctx context.Context, args wallet.InternalizeActionArgs, _ string) (*wallet.InternalizeActionResult, error) {
+	in, err := p.Check(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.Broadcast(ctx, in); err != nil {
+		return nil, err
+	}
+	if err := p.Await(ctx, in); err != nil {
+		return nil, err
+	}
+	if err := p.Take(in); err != nil {
+		return nil, err
+	}
+	return &wallet.InternalizeActionResult{Accepted: true}, nil
+}
+
+// Incoming is a payment Check found paying this identity and verifying
+// against the headers, on its way into the pool.
+type Incoming struct {
+	Tx   *transaction.Transaction
+	Txid string
+	outs []bwallet.Output
+	mp   *transaction.MerklePath
+	h    uint32
+}
+
+// Check is InternalizeAction's checks: the outputs pay this identity's
+// derived keys, and the transaction verifies against Headers.
+func (p *Purse) Check(ctx context.Context, args wallet.InternalizeActionArgs) (*Incoming, error) {
 	if len(args.Outputs) == 0 {
 		return nil, fmt.Errorf("%w: nothing to internalize", ErrRefusedAction)
 	}
@@ -198,35 +232,32 @@ func (p *Purse) InternalizeAction(ctx context.Context, args wallet.InternalizeAc
 	if ok, err := spv.Verify(ctx, tx, p.Headers, nil); err != nil || !ok {
 		return nil, fmt.Errorf("purse: the payment does not verify against the headers: %v", err)
 	}
-	mp, height, err := p.broadcast(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	for i := range outs {
-		outs[i].Height, outs[i].Raw, outs[i].Bump = height, tx.Hex(), mp.Hex()
-	}
-	if _, err := p.Pool.Add(outs...); err != nil {
-		return nil, err
-	}
-	return &wallet.InternalizeActionResult{Accepted: true}, nil
+	return &Incoming{Tx: tx, Txid: txid.String(), outs: outs}, nil
 }
 
-// broadcast hands tx to the settlement leg and waits for its proof. A
-// transaction already mined is taken as it is; one the network already
-// holds is waited for.
-func (p *Purse) broadcast(ctx context.Context, tx *transaction.Transaction) (*transaction.MerklePath, uint32, error) {
+// Broadcast hands a checked payment to the settlement leg. One already
+// mined is taken as it is; one the network already holds is not an error.
+func (p *Purse) Broadcast(ctx context.Context, in *Incoming) error {
 	if p.Asset == nil {
-		return nil, 0, errors.New("purse: no node to wait for the payment's proof (config key asset)")
+		return errors.New("purse: no node to wait for the payment's proof (config key asset)")
 	}
-	id := tx.TxID().String()
-	if mp, h, err := p.Asset.Proof(ctx, id); err == nil {
-		return mp, h, nil
+	if mp, h, err := p.Asset.Proof(ctx, in.Txid); err == nil {
+		in.mp, in.h = mp, h
+		return nil
 	}
 	if p.Settler == nil {
-		return nil, 0, errors.New("purse: no settlement leg to broadcast the payment (config key settle)")
+		return errors.New("purse: no settlement leg to broadcast the payment (config key settle)")
 	}
-	if err := p.Settler.Submit(ctx, tx); err != nil && !alreadyKnown(err) {
-		return nil, 0, fmt.Errorf("purse: broadcasting payment %s: %w (the payer may have spent its inputs elsewhere)", id, err)
+	if err := p.Settler.Submit(ctx, in.Tx); err != nil && !alreadyKnown(err) {
+		return fmt.Errorf("purse: broadcasting payment %s: %w (the payer may have spent its inputs elsewhere)", in.Txid, err)
+	}
+	return nil
+}
+
+// Await waits, up to Wait, for a broadcast payment to mine.
+func (p *Purse) Await(ctx context.Context, in *Incoming) error {
+	if in.mp != nil {
+		return nil
 	}
 	wait, poll := p.Wait, p.Poll
 	if wait <= 0 {
@@ -237,11 +268,25 @@ func (p *Purse) broadcast(ctx context.Context, tx *transaction.Transaction) (*tr
 	}
 	wctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	mp, h, err := nodeapi.WaitMined(wctx, p.Asset, id, poll)
+	mp, h, err := nodeapi.WaitMined(wctx, p.Asset, in.Txid, poll)
 	if err != nil {
-		return nil, 0, fmt.Errorf("purse: payment %s is broadcast and not yet mined (%v); run the command again to take it into the pool once it is", id, err)
+		return fmt.Errorf("purse: payment %s is broadcast and not yet mined (%v); run the command again to take it into the pool once it is", in.Txid, err)
 	}
-	return mp, h, nil
+	in.mp, in.h = mp, h
+	return nil
+}
+
+// Take adds a mined payment's outputs to the pool with their derivation.
+func (p *Purse) Take(in *Incoming) error {
+	if in.mp == nil {
+		return fmt.Errorf("purse: payment %s has not mined", in.Txid)
+	}
+	outs := slices.Clone(in.outs)
+	for i := range outs {
+		outs[i].Height, outs[i].Raw, outs[i].Bump = in.h, in.Tx.Hex(), in.mp.Hex()
+	}
+	_, err := p.Pool.Add(outs...)
+	return err
 }
 
 // alreadyKnown reports a node's answer for a transaction it already holds.

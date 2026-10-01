@@ -9,6 +9,7 @@ import (
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
+	"github.com/lightwebinc/bcommon/bwallet"
 	"github.com/lightwebinc/bcommon/carrier"
 	"github.com/lightwebinc/bcommon/funding"
 	"github.com/lightwebinc/bcommon/guard"
@@ -34,7 +35,11 @@ var ErrSweepInFlight = errors.New("a sweep is still in flight; the next drop fin
 // the offices the carriers it retracts are in.
 func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offices []string) (*state.Sweep, error) {
 	if e.St.InFlight() != nil {
-		if err := e.FinishSweep(ctx); err != nil {
+		var refusedErr *SweepRefusedError
+		if err := e.FinishSweep(ctx); errors.As(err, &refusedErr) {
+			// It failed for good, which frees this drop to go on.
+			e.note("%v", err)
+		} else if err != nil {
 			return nil, err
 		}
 	}
@@ -58,10 +63,20 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 	if err != nil {
 		return nil, err
 	}
+	before := e.Pool.Outputs()
 	payer := e.NewPayer()
 	fee, err := payer.Take(ctx)
 	if err != nil {
 		return nil, FeeError(fmt.Errorf("sweep fee: %w", err))
+	}
+	// The coin as the pool held it, so a refused sweep can give it back.
+	var coin *bwallet.Output
+	feeOp := fmt.Sprintf("%s.%d", fee.Tx.TxID(), fee.Vout)
+	for i := range before {
+		if before[i].Outpoint() == feeOp {
+			coin = &before[i]
+			break
+		}
 	}
 	change, err := e.Signer.FundScript()
 	if err != nil {
@@ -74,7 +89,7 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 		payer.GiveBack()
 		return nil, err
 	}
-	sw := state.Sweep{Tree: txid, Vouts: slices.Clone(vouts), Offices: slices.Clone(offices), Txid: tx.TxID().String(), RawHex: tx.Hex()}
+	sw := state.Sweep{Tree: txid, Vouts: slices.Clone(vouts), Offices: slices.Clone(offices), Txid: tx.TxID().String(), RawHex: tx.Hex(), Fee: coin}
 	e.St.Sweeps = append(e.St.Sweeps, sw)
 	if t := e.St.Tree; t != nil && t.Txid == txid {
 		// The rest of the tree stays usable only past every output swept.
@@ -93,8 +108,10 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 }
 
 // FinishSweep takes the sweep in flight, if any, through settlement, its
-// proof and its publication. A sweep a network refuses is dropped from
-// flight and reported.
+// proof and its publication. A sweep the network definitively refuses is
+// marked failed, its fee coin given back when the node shows it unspent,
+// and a *SweepRefusedError returned: it is no longer in flight, so a later
+// drop goes on. Any other failure leaves it in flight, to be tried again.
 func (e *Engine) FinishSweep(ctx context.Context) error {
 	sw := e.St.InFlight()
 	if sw == nil {
@@ -111,6 +128,9 @@ func (e *Engine) FinishSweep(ctx context.Context) error {
 				return fmt.Errorf("sweep %s: %w (it is persisted; the next drop sends it again)", sw.Txid, err)
 			}
 			if err := e.Legs.Settler.Submit(ctx, tx); err != nil && !alreadyKnown(err) {
+				if why := e.refusal(ctx, tx, err); why != "" {
+					return e.failSweep(ctx, sw, why)
+				}
 				return fmt.Errorf("sweep %s: settle via %s: %w (it is persisted; the next drop sends it again)", sw.Txid, e.Legs.Settler.Name(), err)
 			}
 			sw.Submitted = true
@@ -118,8 +138,16 @@ func (e *Engine) FinishSweep(ctx context.Context) error {
 				return err
 			}
 		}
+		// A leg with no answer (the tcp ingress) or a verdict that came
+		// later: the node's view of the inputs says before any wait.
+		if why := e.refusal(ctx, tx, nil); why != "" {
+			return e.failSweep(ctx, sw, why)
+		}
 		mp, height, err := payer.Await(ctx, "sweep", tx)
 		if err != nil {
+			if why := e.refusal(ctx, tx, nil); why != "" {
+				return e.failSweep(ctx, sw, why)
+			}
 			return fmt.Errorf("sweep %s: %w (the next drop waits again)", sw.Txid, err)
 		}
 		sw.BumpHex, sw.Height = mp.Hex(), height
@@ -154,10 +182,10 @@ func (e *Engine) FinishSweep(ctx context.Context) error {
 }
 
 // sweptBy is the sweep that spends output vout of the funding tree txid,
-// or nil.
+// or nil. A failed sweep spends nothing.
 func (e *Engine) sweptBy(txid string, vout uint32) *state.Sweep {
 	for i := range e.St.Sweeps {
-		if sw := &e.St.Sweeps[i]; sw.Tree == txid && slices.Contains(sw.Vouts, vout) {
+		if sw := &e.St.Sweeps[i]; sw.Failed == "" && sw.Tree == txid && slices.Contains(sw.Vouts, vout) {
 			return sw
 		}
 	}

@@ -577,6 +577,11 @@ func cmdDoctor(ctx context.Context, g *global, args []string) error {
 			if sw := st.InFlight(); sw != nil {
 				fmt.Fprintf(out, "sweep       %s in flight; the next drop finishes it\n", sw.Txid)
 			}
+			for _, sw := range st.Sweeps {
+				if sw.Failed != "" {
+					fmt.Fprintf(out, "sweep       %s FAILED: %s; it retracts nothing (drop again to sweep its outputs)\n", sw.Txid, termsafe.Text(sw.Failed))
+				}
+			}
 		}
 	}
 	if g.cfg.HeaderURL == "" {

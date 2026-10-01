@@ -144,6 +144,8 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
     }
   }
   for (const kind of AdmitKinds) host.metrics.preset('bbox_admitted_total', { kind })
+  for (const kind of AdmitKinds) host.metrics.preset('bbox_admitted_repeats_total', { kind })
+  for (const why of ['cap', 'idle']) host.metrics.preset('bbox_sessions_evicted_total', { why })
   for (const reason of Reasons) host.metrics.preset('bbox_refused_total', { reason })
   for (const why of ['evidence', 'retention']) host.metrics.preset('bbox_dropped_total', { why })
   host.metrics.preset('bbox_retractions_total')

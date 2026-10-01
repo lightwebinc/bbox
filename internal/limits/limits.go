@@ -89,6 +89,14 @@ const (
 	DefaultMaxPrice = 1000
 )
 
+// Settling. DefaultSettleInFlight and MaxSettleInFlight bound the payments
+// one payee settle run has broadcast and not yet seen mined: each is a
+// proof poll against the node until its block.
+const (
+	DefaultSettleInFlight = 16
+	MaxSettleInFlight     = 64
+)
+
 // Send is a sender's settings, as the checks see them.
 type Send struct {
 	Plane       bool

@@ -51,14 +51,14 @@ variables.
 | `office list` | yes | nothing | the offices this home created |
 | `send <recipient> [box]` | yes | `office`, `settle`, `asset`; `facade` (plane) or `hosts` and `header_url` (unicast) | seals a message, with an optional payment and references, and publishes it |
 | `drop <txid>...` | yes | as `send` | retracts sent envelopes: sweeps their funding outputs, and publishes the sweep once it mines |
-| `list` | optional | `office`, `hosts`, `header_url` | the open envelopes in the inbox, one box or from one sender, from every host, compared |
+| `list` | optional | `office`, `hosts`, `header_url` | the open envelopes in the inbox, one box or from one sender, from every host, compared; `-fill` copies an envelope a host lacks across to it |
 | `read [txid...]` | yes | as `list` | verifies, decrypts and prints envelopes, and records them for `ack` and `internalize` |
 | `ack <txid>...` | yes | as `send` | acknowledges envelopes read, one receipt per 64 |
 | `internalize <txid>` | yes | as `list`, and `asset`, `settle` | takes the payment inside an envelope into the wallet, then acknowledges it |
 | `history` | yes | `office`, `history_host`, `header_url`, `asset`, `settle` | the priced question: pays the host's 402 from the pool, prints what the host keeps that is no longer open |
 | `terms [URL]` | no | `history_host` or URL | prints a host's terms document |
 | `payee key -out FILE` | yes | nothing | writes `BBOX_PAYEE_KEY` for this home's identity to a new file, mode 0600 |
-| `payee settle <payments.jsonl>` | yes, the payee's | `header_url`, `asset`, `settle` | internalizes every payment in a host's ledger this home has not |
+| `payee settle <payments.jsonl>` | yes, the payee's | `header_url`, `asset`, `settle` | internalizes every payment in a host's ledger this home has not: all broadcast, then awaited together (`-in-flight`) |
 | `doctor` | optional | nothing | the home's state and whether the node, headers, hosts and priced host answer; reads only |
 | `version` | no | nothing | prints the version |
 
@@ -274,6 +274,24 @@ not shown, and the exit is 1. Hosts that answer different sets are
 reported, host by host, with the envelopes each lacks, and the exit is 3:
 the union is shown, never merged silently. An empty answer proves nothing.
 
+```console
+$ bbox list -fill
+2026-01-05T10:02:11Z  8b0e...12fa  from 02c6...9a1e  box inbox  1874B  [https://host-a.example.com]
+host https://host-b.example.com: DISAGREES: it does not answer 1 envelope(s) another host answered: 8b0e...12fa
+1 envelope(s) in the inbox of support_qzxkvbmwtr, 2 of 2 host(s) answering
+host https://host-b.example.com: filled 1 of 1 envelope(s) it lacked
+```
+
+`list -fill` repairs that: each envelope a host lacks is copied across to
+it (spec section 9: a carrier verifies on its own, so anyone holding one
+may submit it), the carrier as it verified here, submitted to that host
+alone and counted once a lookup there answers it. The exit is 0 once every
+copy is confirmed. A host that dropped the carrier (a superseded or
+retracted one) does not take it back and stays reported, exit 3. On the
+plane a host that was down receives what it missed from the plane's
+repair; `-fill` is for a host off the plane, or one a unicast publisher
+did not reach.
+
 `read` then decrypts and applies the recipient's checks in the order of
 spec section 4.7: a message the key cannot open is shown as
 `UNDECRYPTABLE`, never as empty; a plaintext that breaks the rules is
@@ -336,8 +354,25 @@ publishes it to each office it retracts in: on the plane to the facade and
 directly to every other host in `hosts`, in mode unicast to every host. A
 host that holds the sweep answers none of those envelopes again, read or
 not. `drop -tree TXID -yes` sweeps every output of a funding tree, used or
-not, which retracts every carrier on it, receipts included. A sweep in
-flight is persisted and finished by the next `drop`.
+not, which retracts every carrier on it, receipts included.
+
+A sweep is persisted before it is settled. One the settlement leg did not
+take (unreachable, busy, no verdict yet) stays in flight, `doctor` says so,
+and the next `drop` sends it again before anything else; it never sweeps
+an output twice. One the network refuses for good is marked failed
+instead, and `drop` exits 1 with the reason:
+
+```text
+bbox: sweep 9e2c...5f18 refused by the network: arcade reports DOUBLE_SPEND_ATTEMPTED; it is marked failed and retracts nothing; its fee coin 41d0...77aa.1 (1830 sat) is back in the pool; drop again to build a new sweep
+```
+
+A refusal is arcade's verdict `REJECTED` or `DOUBLE_SPEND_ATTEMPTED`,
+arcade's HTTP 422 or 460 to 475, a node's RPC error -25 or -26 (except a
+full mempool or too long a chain), or an input of the sweep that the node
+shows spent by another transaction. The fee coin goes back to the pool
+only when the node shows it unspent. The failed sweep retracts nothing, no
+longer blocks a drop, and `doctor` lists it as `FAILED`; `drop` again
+builds a new sweep of whatever outputs are still unspent.
 
 ## The priced question
 
@@ -381,8 +416,11 @@ and does not broadcast it. **Until a payment is settled, its payer can
 spend the same coins elsewhere**, so the payee settles on a schedule.
 `payee settle` internalizes each payment the home has not settled, as
 `internalize` does, and records it; one the network refuses is reported
-and left, and the exit is 1. docs/host.md says how a host is configured
-with the key.
+and left, and the exit is 1. It checks every payment first, broadcasts
+them all, and then waits for their proofs together, so a run takes about
+one block however many it settles; `-in-flight N` (default 16, at most 64)
+bounds how many are broadcast and not yet mined at once. docs/host.md says
+how a host is configured with the key.
 
 ## Doctor
 

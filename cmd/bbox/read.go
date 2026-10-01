@@ -31,6 +31,7 @@ import (
 	"github.com/lightwebinc/bbox/internal/reader"
 	"github.com/lightwebinc/bbox/internal/send"
 	"github.com/lightwebinc/bbox/internal/state"
+	"github.com/lightwebinc/bbox/internal/unicast"
 )
 
 // view is which envelope class a reading command asks: the inbox, a box, or
@@ -163,7 +164,7 @@ func hostsOf(l *reader.Listing, txid string, asked int) string {
 	return strings.Join(l.By[txid], ", ")
 }
 
-const listHelp = `usage: bbox list [-box BOX | -from KEY] [-office OFFICE] [-to KEY]
+const listHelp = `usage: bbox list [-box BOX | -from KEY] [-office OFFICE] [-to KEY] [-fill]
 
 List the open envelopes to this identity (or -to) in the office: the inbox
 (every box), one box, or one sender's envelopes. Every host configured is
@@ -171,11 +172,18 @@ asked, page after page; every envelope is checked against the headers and
 the host's own rules before it is printed, and the hosts' answers are
 compared: a host that withholds an envelope another answered is reported,
 never merged silently (exit 3). One line per envelope: created, txid,
-sender, box, size, and the hosts that answered it.`
+sender, box, size, and the hosts that answered it.
+
+-fill copies each envelope a host lacks across to it (spec section 9): the
+carrier as another host answered it and as it verified here, submitted to
+the host that lacks it and confirmed there by a lookup. A host that did not
+lose it but dropped it (a superseded carrier, for one) does not take it
+back, and stays reported. Exit 0 once every host holds every envelope.`
 
 func cmdList(ctx context.Context, g *global, args []string) error {
 	fs := g.flagSet("list", listHelp)
 	vf := g.viewFlags(fs)
+	fill := fs.Bool("fill", false, "copy each envelope a host lacks across to it")
 	if pos, err := parse(fs, args); err != nil {
 		return err
 	} else if len(pos) > 0 {
@@ -210,6 +218,45 @@ func cmdList(ctx context.Context, g *global, args []string) error {
 		fmt.Fprintln(g.stdout, line)
 	}
 	g.say("%d envelope(s) in the %s of %s, %d of %d host(s) answering", len(l.Items), v, termsafe.Text(v.office), l.Answered(), len(l.Answers))
+	if *fill && len(l.Missing()) > 0 {
+		return g.fill(ctx, rd, l, v, problem)
+	}
+	return problem
+}
+
+// fill copies every envelope a host lacks across to it, as spec section 9
+// allows anyone holding a verified carrier to: submitted to that host
+// alone, and counted once a lookup there answers it. It returns problem
+// unless the listing's only problem was the hosts' disagreement and every
+// copy was confirmed.
+func (g *global) fill(ctx context.Context, rd *reader.Client, l *reader.Listing, v view, problem error) error {
+	failed := 0
+	for host, txids := range l.Missing() {
+		set := &unicast.Set{Hosts: []string{host}, Need: 1, Retries: send.Retries, HTTP: httpClient, Note: g.say, Verbose: g.verbose}
+		filled := 0
+		for _, id := range txids {
+			it := l.Find(id)
+			e := it.Envelope()
+			q := reader.Query{"office": v.office, "to": hex.EncodeToString(e.To), "box": e.Box,
+				"after": fmt.Sprintf("%d:%s", e.Created, strings.Repeat("0", 64))}
+			confirm := func(ctx context.Context, host string) (bool, error) { return rd.Held(ctx, host, q, id) }
+			o := set.Send(ctx, "envelope "+id, send.Topic(v.office), it.Beef, 1, confirm)
+			if err := o.Err(); err != nil {
+				failed++
+				g.say("host %s: envelope %s NOT FILLED: %v", host, id, err)
+				continue
+			}
+			filled++
+		}
+		fmt.Fprintf(g.stdout, "host %s: filled %d of %d envelope(s) it lacked\n", host, filled, len(txids))
+	}
+	if failed > 0 {
+		return incomplete("%d envelope(s) not filled; the hosts still disagree", failed)
+	}
+	var ee *exitError
+	if errors.As(problem, &ee) && ee.code == exitIncomplete && l.Answered() == len(l.Answers) && len(l.Refusals()) == 0 {
+		return nil
+	}
 	return problem
 }
 

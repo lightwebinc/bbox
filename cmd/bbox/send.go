@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -429,6 +430,10 @@ func cmdDrop(ctx context.Context, g *global, args []string) error {
 		sw, err := eng.Retract(ctx, p.tree, p.vouts, p.offices)
 		if err != nil {
 			g.tallies(eng)
+			var re *send.SweepRefusedError
+			if errors.As(err, &re) {
+				return refused("%v", re)
+			}
 			return err
 		}
 		fmt.Fprintf(g.stdout, "retracted %d funding output(s) of %s: sweep %s mined at height %d, published to %s\n",

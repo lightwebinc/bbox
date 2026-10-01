@@ -53,6 +53,7 @@ type Chain struct {
 	cbAt           map[string]uint32 // coinbase txid to height
 	utxo           map[transaction.Outpoint]*transaction.TransactionOutput
 	spent          map[transaction.Outpoint]string // outpoint to the txid spending it
+	rejected       map[string]string               // txid to why arcade refused it
 	pending        []string
 	// Hold keeps accepted transactions unmined until Mine; otherwise each
 	// is mined as it is accepted. HoldIf holds only those it answers true
@@ -62,6 +63,10 @@ type Chain struct {
 	// Refuse, when set, is asked about each transaction sent; a non-empty
 	// answer refuses it with that reason.
 	Refuse func(tx *transaction.Transaction) string
+	// Busy, when set, is asked about each transaction sent through the RPC
+	// or arcade; true answers 503, which refuses nothing: a transient
+	// failure the sender tries again.
+	Busy func(tx *transaction.Transaction) bool
 	// Sent counts the transactions accepted.
 	Sent int
 }
@@ -70,7 +75,7 @@ type Chain struct {
 func New(start uint32) *Chain {
 	return &Chain{height: start, roots: map[uint32]chainhash.Hash{},
 		txs: map[string]*transaction.Transaction{}, mined: map[string]uint32{}, cbAt: map[string]uint32{},
-		utxo: map[transaction.Outpoint]*transaction.TransactionOutput{}, spent: map[transaction.Outpoint]string{}}
+		utxo: map[transaction.Outpoint]*transaction.TransactionOutput{}, spent: map[transaction.Outpoint]string{}, rejected: map[string]string{}}
 }
 
 func blockHash(h uint32) string { return fmt.Sprintf("%064x", uint64(0xb10c)<<32|uint64(h)) }
@@ -304,6 +309,8 @@ func (c *Chain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"height": h, "merkleRoot": root.String()})
 	case strings.HasPrefix(p, "/api/v1/"):
 		c.asset(w, r, strings.TrimPrefix(p, "/api/v1/"))
+	case strings.HasPrefix(p, "/arcade/"):
+		c.arcade(w, r, strings.TrimPrefix(p, "/arcade"))
 	default:
 		http.NotFound(w, r)
 	}
@@ -344,6 +351,10 @@ func (c *Chain) rpc(w http.ResponseWriter, r *http.Request) {
 		tx, err := transaction.NewTransactionFromHex(s)
 		if err != nil {
 			reply(nil, err)
+			return
+		}
+		if c.Busy != nil && c.Busy(tx) {
+			http.Error(w, "busy", http.StatusServiceUnavailable)
 			return
 		}
 		if err := c.Send(tx); err != nil {
@@ -496,6 +507,76 @@ func (c *Chain) Ingress(l net.Listener) {
 			}()
 		}
 	}()
+}
+
+// arcade is an ARC-compatible broadcaster at /arcade, as bcommon's
+// publish.Arcade speaks to it: POST /tx takes Extended Format and answers
+// the network's verdict at once (a refusal is REJECTED with the reason);
+// GET /tx/{txid} answers the status, MINED with the merkle path once it
+// is. Busy answers 503 to a POST.
+func (c *Chain) arcade(w http.ResponseWriter, r *http.Request, p string) {
+	switch {
+	case r.Method == http.MethodPost && p == "/tx":
+		b, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+		if err != nil || len(b) < 10 || !bytes.Equal(b[4:10], []byte{0, 0, 0, 0, 0, 0xef}) {
+			http.Error(w, `{"title":"not extended format"}`, 460)
+			return
+		}
+		tx, err := transaction.NewTransactionFromBytes(b)
+		if err != nil {
+			http.Error(w, `{"title":"malformed transaction"}`, 461)
+			return
+		}
+		if c.Busy != nil && c.Busy(tx) {
+			http.Error(w, "busy", http.StatusServiceUnavailable)
+			return
+		}
+		id := tx.TxID().String()
+		if err := c.Send(tx); err != nil {
+			c.mu.Lock()
+			c.rejected[id] = err.Error()
+			c.mu.Unlock()
+			writeJSON(w, map[string]any{"txid": id, "txStatus": "REJECTED", "extraInfo": err.Error()})
+			return
+		}
+		writeJSON(w, c.arcadeStatus(id))
+	case r.Method == http.MethodGet && strings.HasPrefix(p, "/tx/"):
+		id := strings.TrimPrefix(p, "/tx/")
+		c.mu.Lock()
+		why, refused := c.rejected[id]
+		_, known := c.txs[id]
+		c.mu.Unlock()
+		switch {
+		case known:
+			writeJSON(w, c.arcadeStatus(id))
+		case refused:
+			writeJSON(w, map[string]any{"txid": id, "txStatus": "REJECTED", "extraInfo": why})
+		default:
+			http.NotFound(w, r)
+		}
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (c *Chain) arcadeStatus(id string) map[string]any {
+	st := map[string]any{"txid": id, "txStatus": "SEEN_ON_NETWORK"}
+	if mp, h, ok := c.Proof(id); ok {
+		st["txStatus"], st["blockHeight"], st["merklePath"] = "MINED", h, mp.Hex()
+	}
+	return st
+}
+
+// SpendElsewhere marks output vout of txid spent by the transaction by, as
+// a competing spend the chain took from someone else would: the output is
+// gone and the UTXO view names by as its spender.
+func (c *Chain) SpendElsewhere(txid string, vout uint32, by string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	h, _ := chainhash.NewHashFromHex(txid)
+	op := transaction.Outpoint{Txid: *h, Index: vout}
+	delete(c.utxo, op)
+	c.spent[op] = by
 }
 
 // IngressRefused is how many submissions the ingress refused.
