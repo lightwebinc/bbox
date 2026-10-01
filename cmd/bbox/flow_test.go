@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -724,5 +725,43 @@ func TestDropWaitsForChangeToMine(t *testing.T) {
 	r := h.must("alice", "", "drop", first)
 	if !strings.Contains(r.stderr, "waiting for one") || !strings.Contains(r.stdout, "retracted 1 funding output(s)") {
 		t.Fatalf("drop:\n%s\n%s", r.stdout, r.stderr)
+	}
+}
+
+// A tree minted ahead by one run is the successor for the next: a later run
+// that spends near the end of the tree does not mint yet another.
+func TestOneTreeMintedAheadAcrossRuns(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	ahead := func() int {
+		raw, err := os.ReadFile(filepath.Join(h.dir, "alice", "state.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var st struct {
+			Ahead []json.RawMessage `json:"ahead"`
+		}
+		if err := json.Unmarshal(raw, &st); err != nil {
+			t.Fatal(err)
+		}
+		return len(st.Ahead)
+	}
+	// Eight outputs, minted ahead at four left: the fourth send starts the
+	// next tree, and the fifth to seventh, each a run of its own, must not.
+	for i := 1; i <= 7; i++ {
+		h.send("alice", bob, fmt.Sprintf("n%d", i), "-tree-count", "8")
+		if i >= 4 && ahead() != 1 {
+			t.Fatalf("after send %d: %d tree(s) minted ahead, want 1", i, ahead())
+		}
+	}
+	// The eighth uses the last output; the ninth switches to the tree
+	// minted ahead, with no mint of its own.
+	h.send("alice", bob, "n8", "-tree-count", "8")
+	h.send("alice", bob, "n9", "-tree-count", "8")
+	if n := ahead(); n != 0 {
+		t.Fatalf("after switching: %d tree(s) still minted ahead", n)
 	}
 }

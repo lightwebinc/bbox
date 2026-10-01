@@ -284,6 +284,16 @@ func (e *Engine) Close(ctx context.Context) error {
 // the tree's proof cut to the minimal one a host admits.
 func (e *Engine) spend(ctx context.Context) (*transaction.Transaction, uint32, error) {
 	e.promoteAhead()
+	// A tree an earlier run minted ahead is the successor already: the
+	// library knows only a tree minted ahead in this run, and would mint
+	// another on every run that spends near the end of the tree, each
+	// taking a coin (and, from a pool of one coin, leaving nothing proven
+	// for the next fee until it mines).
+	if e.hasAhead() {
+		e.trees.Ahead = 0
+	} else {
+		e.trees.Ahead = e.Opts.Ahead
+	}
 	tree, vout, err := e.trees.Spend(ctx, 1)
 	if err != nil {
 		return nil, 0, FeeError(fmt.Errorf("funding tree: %w", err))
@@ -299,6 +309,17 @@ func (e *Engine) spend(ctx context.Context) (*transaction.Transaction, uint32, e
 	}
 	tree.MerklePath = mp
 	return tree, vout, nil
+}
+
+// hasAhead reports whether an earlier run recorded a tree minted ahead for
+// this identity with outputs left.
+func (e *Engine) hasAhead() bool {
+	for _, t := range e.St.Ahead {
+		if t.IdentityKeyHex == e.Signer.IdentityHex() && t.Remaining() > 0 && (e.St.Tree == nil || t.Txid != e.St.Tree.Txid) {
+			return true
+		}
+	}
+	return false
 }
 
 // promoteAhead makes a tree minted ahead by an earlier run the current one
