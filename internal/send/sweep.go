@@ -11,6 +11,7 @@ import (
 
 	"github.com/lightwebinc/bcommon/carrier"
 	"github.com/lightwebinc/bcommon/funding"
+	"github.com/lightwebinc/bcommon/guard"
 
 	"github.com/lightwebinc/bbox/internal/state"
 )
@@ -40,6 +41,19 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 	if len(vouts) == 0 || len(offices) == 0 {
 		return nil, errors.New("a sweep spends at least one output and is published to at least one office")
 	}
+	// An output a sweep already spends is not swept again: a drop asked
+	// again after one failed part way names the outputs of the sweep
+	// finished since (here, or when the engine opened).
+	var left []uint32
+	for _, v := range vouts {
+		if e.sweptBy(txid, v) == nil {
+			left = append(left, v)
+		}
+	}
+	if len(left) == 0 {
+		return e.sweptBy(txid, vouts[0]), nil
+	}
+	vouts = left
 	tree, err := e.kept.Tx(txid)
 	if err != nil {
 		return nil, err
@@ -93,6 +107,9 @@ func (e *Engine) FinishSweep(ctx context.Context) error {
 	if sw.BumpHex == "" {
 		payer := e.NewPayer()
 		if !sw.Submitted {
+			if err := e.sources(ctx, tx); err != nil {
+				return fmt.Errorf("sweep %s: %w (it is persisted; the next drop sends it again)", sw.Txid, err)
+			}
 			if err := e.Legs.Settler.Submit(ctx, tx); err != nil && !alreadyKnown(err) {
 				return fmt.Errorf("sweep %s: settle via %s: %w (it is persisted; the next drop sends it again)", sw.Txid, e.Legs.Settler.Name(), err)
 			}
@@ -134,6 +151,48 @@ func (e *Engine) FinishSweep(ctx context.Context) error {
 	}
 	e.St.Done(p.Txid)
 	return e.St.Save()
+}
+
+// sweptBy is the sweep that spends output vout of the funding tree txid,
+// or nil.
+func (e *Engine) sweptBy(txid string, vout uint32) *state.Sweep {
+	for i := range e.St.Sweeps {
+		if sw := &e.St.Sweeps[i]; sw.Tree == txid && slices.Contains(sw.Vouts, vout) {
+			return sw
+		}
+	}
+	return nil
+}
+
+// sources gives every input of a sweep rebuilt from its raw bytes the
+// transaction it spends: a settlement leg takes Extended Format (BRC-30),
+// which carries each input's previous output. The funding tree is the
+// home's own; the fee coin's parent is read from the node.
+func (e *Engine) sources(ctx context.Context, tx *transaction.Transaction) error {
+	for i, in := range tx.Inputs {
+		if in.SourceTransaction != nil {
+			continue
+		}
+		id := in.SourceTXID.String()
+		src, err := e.kept.Tx(id)
+		if err != nil {
+			if e.Legs.Asset == nil {
+				return fmt.Errorf("input %d: %s is not kept and no node is configured to read it from", i, id)
+			}
+			raw, ferr := e.Legs.Asset.TxRaw(ctx, id)
+			if ferr != nil {
+				return fmt.Errorf("input %d: reading %s from the node: %w", i, id, ferr)
+			}
+			if src, err = guard.ParseTransaction(raw, guard.DefaultBound); err != nil {
+				return fmt.Errorf("input %d: %s from the node: %w", i, id, err)
+			}
+		}
+		if src.TxID().String() != id || int(in.SourceTxOutIndex) >= len(src.Outputs) {
+			return fmt.Errorf("input %d: the transaction found for %s is not the one it spends", i, id)
+		}
+		in.SourceTransaction = src
+	}
+	return nil
 }
 
 // TreeOf finds a funding tree the home recorded.

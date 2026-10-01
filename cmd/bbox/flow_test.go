@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -335,5 +336,65 @@ func TestUnicastAcknowledgedResendIsConfirmed(t *testing.T) {
 	r = h.must("alice", "", "send", bob, "-m", "two", "-rate", "20", "-tree-count", "4")
 	if !strings.Contains(r.stdout, "host "+h.aS.URL+": took 2 object(s), missed 0") || !h.b.Holds(tx) {
 		t.Fatalf("resend:\n%s\n%s", r.stdout, r.stderr)
+	}
+}
+
+// Every transaction the command settles goes through a leg that takes
+// Extended Format only, as a fabric ingress and arcade do: a funding tree,
+// a payment the recipient internalizes, and a sweep, whose inputs are
+// given their sources again after it is rebuilt from its persisted bytes.
+func TestSettlementLegTakesExtendedFormat(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	h.chain.Ingress(l)
+	h.env["BBOX_SETTLE"] = "tcp:" + l.Addr().String()
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	tx := h.send("alice", bob, "paid", "-pay", "2000")
+	h.must("bob", "", "read", tx)
+	r := h.must("bob", "", "internalize", tx)
+	if !strings.Contains(r.stdout, "internalized 2000 sat") {
+		t.Fatalf("internalize:\n%s\n%s", r.stdout, r.stderr)
+	}
+	gone := h.send("alice", bob, "take back")
+	r = h.must("alice", "", "drop", gone)
+	if !strings.Contains(r.stdout, "retracted 1 funding output(s)") {
+		t.Fatalf("drop:\n%s\n%s", r.stdout, r.stderr)
+	}
+	if n := h.chain.IngressRefused(); n != 0 {
+		t.Fatalf("the ingress refused %d submission(s)", n)
+	}
+}
+
+// A drop whose sweep the settlement leg did not take leaves it in flight;
+// the same drop asked again finishes that sweep and sweeps nothing twice.
+func TestDropAgainFinishesTheSweepInFlight(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	gone := h.send("alice", bob, "take back")
+	h.chain.Refuse = func(*transaction.Transaction) string { return "busy" }
+	h.want(h.run("alice", "", "drop", gone), exitUsage, "it is persisted; the next drop sends it again")
+	h.chain.Refuse = nil
+	r := h.must("alice", "", "drop", gone)
+	if !strings.Contains(r.stdout, "retracted 1 funding output(s)") || strings.Count(r.stdout, "retracted ") != 1 {
+		t.Fatalf("drop again:\n%s\n%s", r.stdout, r.stderr)
+	}
+	for _, host := range []*testchain.Host{h.a, h.b} {
+		if host.Status(gone) != "retracted" {
+			t.Fatalf("status %s", host.Status(gone))
+		}
+	}
+	r = h.must("alice", "", "doctor")
+	if strings.Contains(r.stdout, "in flight") || !strings.Contains(r.stdout, "1 sweep(s)") {
+		t.Fatalf("doctor:\n%s", r.stdout)
 	}
 }

@@ -21,11 +21,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/script"
@@ -42,15 +44,16 @@ const Maturity = 100
 
 // Chain is the local chain.
 type Chain struct {
-	mu      sync.Mutex
-	height  uint32
-	roots   map[uint32]chainhash.Hash
-	txs     map[string]*transaction.Transaction
-	mined   map[string]uint32
-	cbAt    map[string]uint32 // coinbase txid to height
-	utxo    map[transaction.Outpoint]*transaction.TransactionOutput
-	spent   map[transaction.Outpoint]string // outpoint to the txid spending it
-	pending []string
+	mu             sync.Mutex
+	ingressRefused atomic.Int64
+	height         uint32
+	roots          map[uint32]chainhash.Hash
+	txs            map[string]*transaction.Transaction
+	mined          map[string]uint32
+	cbAt           map[string]uint32 // coinbase txid to height
+	utxo           map[transaction.Outpoint]*transaction.TransactionOutput
+	spent          map[transaction.Outpoint]string // outpoint to the txid spending it
+	pending        []string
 	// Hold keeps accepted transactions unmined until Mine; otherwise each
 	// is mined as it is accepted. HoldIf holds only those it answers true
 	// for.
@@ -462,3 +465,38 @@ func (c *Chain) ef(tx *transaction.Transaction) []byte {
 	}
 	return b
 }
+
+// Ingress is a fabric ingress as bcommon's publish.TCPIngress writes to:
+// one transaction per connection, in Extended Format only, handed to Send.
+// A raw transaction, or one whose inputs do not carry the outputs they
+// spend, is refused (its connection is closed and it is counted), as a
+// settlement leg that takes EF refuses it. It serves until l is closed.
+func (c *Chain) Ingress(l net.Listener) {
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				b, err := io.ReadAll(io.LimitReader(conn, 8<<20))
+				if err != nil || len(b) < 10 || !bytes.Equal(b[4:10], []byte{0, 0, 0, 0, 0, 0xef}) {
+					c.ingressRefused.Add(1)
+					return
+				}
+				tx, err := transaction.NewTransactionFromBytes(b)
+				if err != nil {
+					c.ingressRefused.Add(1)
+					return
+				}
+				if err := c.Send(tx); err != nil {
+					c.ingressRefused.Add(1)
+				}
+			}()
+		}
+	}()
+}
+
+// IngressRefused is how many submissions the ingress refused.
+func (c *Chain) IngressRefused() int64 { return c.ingressRefused.Load() }
