@@ -15,11 +15,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -319,6 +321,34 @@ func (c *Client) Held(ctx context.Context, host string, q Query, txid string) (b
 	}
 	for _, o := range outs {
 		if subjectID(o.Beef) == txid {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Acknowledged asks host whether it answers a receipt by to whose acks
+// list the envelope txid, and checks the receipt as Verify does. In
+// unicast such a receipt also confirms that the host took the envelope
+// (spec section 9): an acknowledged envelope is not open, so no box
+// question answers it, and a resent copy is a duplicate that admits
+// nothing.
+func (c *Client) Acknowledged(ctx context.Context, host, office string, to []byte, txid string) (bool, error) {
+	want, err := Hash(txid)
+	if err != nil {
+		return false, err
+	}
+	outs, err := c.Ask(ctx, host, Query{"office": office, "by": hex.EncodeToString(to), "receiptFor": txid})
+	if err != nil {
+		return false, err
+	}
+	for _, o := range outs {
+		it, err := Verify(ctx, o.Beef, office, boxrec.TxReceipt, nil, c.Headers)
+		if err != nil || it.Admission.Carrier == nil || it.Admission.Carrier.Receipt == nil {
+			continue
+		}
+		r := it.Admission.Carrier.Receipt
+		if bytes.Equal(r.By, to) && slices.Contains(r.Acks, want) {
 			return true, nil
 		}
 	}

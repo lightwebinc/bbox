@@ -27,7 +27,7 @@ that registry.
 | Record magic | `bbr` `0x01` | receipt record, version 1 (`"bb"`, `'r'`, version) | signed |
 | Topics | `tm_bbox_<name>_<suffix>` | one topic per office: a readable `<name>` of at most 31 characters and a 10-letter random `<suffix>` fixed at the office's creation (spec section 7.1); the `tm_bbox_` namespace belongs to bbox | signed |
 | Lookup service | `ls_bbox` | one per host, all offices; every question names its office | signed |
-| Host route | `<base>/ls_bbox/terms` | the host terms document (spec section 7.4) | signed |
+| Host route | `<base>/ls_bbox/terms` | the host terms document (spec section 7.4); `<base>` is an origin, with no path | signed |
 | Baskets | `bbox fund`, `bbox envelope funding`, `bbox kill tombstone` | wallet baskets; never on a public host, registered so no two applications share one in a wallet | signed |
 
 Tag type bytes `0x01`, `0x03` to `0x64`, `0x66` to `0x71` and `0x73` to
@@ -49,11 +49,11 @@ magics `bbe` and `bbr`.
 | Classifier | an output claims a record when its script is `0x21`, 33 bytes, `0xac`, then a push (`0x01` to `0x4b`, or `OP_PUSHDATA1`, `2`, `4`, every byte present) whose data starts with a CBOR definite map head, `00 44` and `bbe 0x01` or `bbr 0x01`; two claiming outputs refuse the transaction (`script-v1.json`) | signed |
 | Funding output | `<derive(owner, "envelope")> OP_CHECKSIG <62 62 02> OP_DROP`, unsigned; a carrier's funding parent carries its proof in the carrier's BEEF | signed |
 | Sweep | a mined transaction whose outputs claim nothing and whose output 0 is a funding-shaped output under any compressed key (bcommon's tombstone); only output 0 is admitted; only a mined spend of a carrier's funding outpoint by another transaction retracts; a retracted receipt acknowledges nothing; an unmined transaction whose output 0 is funding-shaped is judged as a sweep even when it spends a held output, refused `unmined` and decided again when it arrives mined; a published funding tree, once mined, is admitted as a sweep (output 0 held, its fee input's outpoint recorded as swept) | signed |
-| Publication | funding trees are not published to an office; sweeps are published once, after they mine, and also directly to every host named | signed |
+| Publication | funding trees are not published to an office; a sweep is published once to each office whose carriers it retracts, after it mines, and also directly to every host named; in unicast a `receipt` answer naming an envelope also confirms that a host took the envelope | signed |
 | Commitment | `C = txid(K)`, hash byte order in records, display order in JSON | signed |
 | CBOR | RFC 8949 section 4.2.1 core deterministic encoding, bcommon's subset, enforced on decode | signed |
 | Admission | a verdict depends only on the transaction, the transactions its inputs name, the BEEF it arrived in and the host's headers; no verdict reads the topic's previous coins, which decide only retention; **a topic manager returns instructions only for what it admits and raises for every refusal**, so no refusal is recorded; transaction-level reasons `carrier-shape`, `beef`, `office`, `mineable`, `unlock`, `lock`, `signature`, `funding`, `unmined`, `not-bbox`; `beef` labels every refusal of a BEEF (over the host's bound, unparseable, and so on), and a host that names no bound uses 262144 bytes | signed |
-| One answered carrier per funding outpoint, over the host's life | the winner is the lowest `C` (hash byte order) among acknowledged envelopes on the outpoint, else among all carriers on it; every other carrier is `superseded`, and so is every carrier once the winner is dropped; up to 8 kept as evidence (64 when the winner is acknowledged), the rest dropped | signed |
+| One answered carrier per funding outpoint, over the host's life | the winner is the lowest `C` (hash byte order) among acknowledged envelopes on the outpoint, else among all carriers on it; every other carrier is `superseded`, and so is every carrier once the winner is dropped; up to 8 kept as evidence (64 when the winner is acknowledged), the rest dropped; which are kept depends on arrival order, their statuses do not | signed |
 | Status precedence | `retracted`, then `superseded`, then `acknowledged` (by an answered receipt whose `by` is the envelope's `to`), then `held`; a function of the admitted set, the outpoint rows and the host's best chain | signed |
 | Outpoint rows | one per funding outpoint any admitted carrier spent (commitments, winner, dropped, swept), kept for the host's life | signed |
 | Hosts do not broadcast carriers | an engine that carries `tm_bbox_` topics runs with no broadcaster | signed |
@@ -108,7 +108,7 @@ magics `bbe` and `bbr`.
 | An unknown or missing query member is refused, never ignored; no priced class is a superset of a free class; free classes need no authentication | signed |
 | Open envelope: held, not expired, `created` within 30 days before and 1 hour after the host's time (the answer window) | signed |
 | Retention floors: open envelopes kept; receipts and sweeps kept 31 days after first sight; outpoint rows and sweep outpoints kept for the host's life; dropping deletes outputs, marks the outpoint row and keeps the applied record | signed (floors: a later version may lengthen them, never shorten) |
-| Terms document at `<base>/ls_bbox/terms`: members `service`, `terms` (`1`), `classes` of `{class, satoshis}`; a price is per question (one page); unknown members ignored; absent means no charge; the 402 is authoritative and alone carries the payee and the derivation prefix; priced questions use the same `/lookup` route over BRC-104 | signed |
+| Terms document at `<base>/ls_bbox/terms`, `<base>` an origin with no path: members `service`, `terms` (`1`), `classes` of `{class, satoshis}`; a price is per question (one page); unknown members ignored; absent means no charge; the 402 is authoritative and alone carries the payee and the derivation prefix; priced questions use the same `/lookup` route over BRC-104; the BRC-105 payment is output 0 | signed |
 
 ## 7. Bounds that are a floor
 

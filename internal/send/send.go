@@ -688,9 +688,10 @@ func (e *Engine) submitFacade(ctx context.Context, what, topic string, beef []by
 	return fmt.Errorf("%s: publish: %w; it is persisted and the next command publishes it", what, err)
 }
 
-// confirm is the lookup that shows a host holds p (spec section 9): the
-// box class for an envelope, the receipt class for a receipt, the sweep
-// class for a sweep.
+// confirm is the lookup that shows a host took p (spec section 9): the
+// box class for an envelope, or the receipt class naming it, since an
+// envelope its recipient acknowledged is no longer open; the receipt class
+// for a receipt; the sweep class for a sweep.
 func (e *Engine) confirm(p state.Pending, office string) unicast.Confirm {
 	if e.Legs.Reader == nil {
 		return nil
@@ -707,7 +708,15 @@ func (e *Engine) confirm(p state.Pending, office string) unicast.Confirm {
 		return nil
 	}
 	return func(ctx context.Context, host string) (bool, error) {
-		return e.Legs.Reader.Held(ctx, host, q, p.Txid)
+		ok, err := e.Legs.Reader.Held(ctx, host, q, p.Txid)
+		if ok || err != nil || p.Kind != state.KindEnvelope {
+			return ok, err
+		}
+		to, err := hex.DecodeString(p.To)
+		if err != nil {
+			return false, fmt.Errorf("persisted envelope %s: to: %w", p.Txid, err)
+		}
+		return e.Legs.Reader.Acknowledged(ctx, host, office, to, p.Txid)
 	}
 }
 

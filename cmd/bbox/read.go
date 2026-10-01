@@ -497,7 +497,8 @@ expired, or out of the answer window). It is asked at the host's terms
 route (-at, default the configured history_host) over BRC-104
 authentication; the host answers 402 with its price, and the question is
 asked again with a BRC-29 payment to the host from this home's pool
-(BRC-105), which the host broadcasts. A price over -max-sats is not paid.
+(BRC-105) as output 0, which the host records unbroadcast and its payee
+settles. A price over -max-sats is not paid.
 One payment buys one answer page; -after asks for the page after a cursor
 <created>:<txid>. Every envelope answered is checked as list checks it.`
 
@@ -519,8 +520,8 @@ func cmdHistory(ctx context.Context, g *global, args []string) error {
 	if base == "" {
 		return usage("no host to ask: set history_host (or -at) to the host's terms route base URL")
 	}
-	if u, err := url.Parse(base); err != nil || u.Scheme == "" || u.Host == "" || (u.Path != "" && u.Path != "/") {
-		return usage("history_host %q is not an origin: the terms route is at the root of its own origin, where BRC-104 shakes hands (docs/host.md)", termsafe.Abbrev(base))
+	if err := checkOrigin(base); err != nil {
+		return err
 	}
 	off, err := g.office(*office)
 	if err != nil {
@@ -571,7 +572,7 @@ func cmdHistory(ctx context.Context, g *global, args []string) error {
 	if paid != "" {
 		tx := p.Settle()
 		if tx != nil {
-			fmt.Fprintf(g.stdout, "paid %s sat to %s in %s, broadcast by the host\n", paid, termsafe.Abbrev(resp.Header.Get("x-bsv-auth-identity-key")), tx.TxID())
+			fmt.Fprintf(g.stdout, "paid %s sat to %s in %s, recorded by the host for its payee to settle\n", paid, termsafe.Abbrev(resp.Header.Get("x-bsv-auth-identity-key")), tx.TxID())
 		}
 	} else {
 		p.Refund()
@@ -600,10 +601,22 @@ func cmdHistory(ctx context.Context, g *global, args []string) error {
 	return bad
 }
 
+// checkOrigin refuses a terms base that is not an origin (spec section
+// 7.4): the terms document, the BRC-104 handshake and the priced /lookup
+// all sit at the root of the origin.
+func checkOrigin(base string) error {
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return usage("%q is not an origin: the terms route is at the root of its own origin, where BRC-104 shakes hands (docs/host.md)", termsafe.Abbrev(base))
+	}
+	return nil
+}
+
 const termsHelp = `usage: bbox terms [URL]
 
 Fetch and print a host's terms document (spec section 7.4) from the base
-URL of its ls_bbox (default the configured history_host): the classes it
+URL of its ls_bbox, an origin with no path (default the configured
+history_host): the classes it
 prices and the price of one question of each. A host that serves none
 charges for nothing. The document is informative: the 402 is what a
 client pays against, and a free class is never paid for, whatever a
@@ -624,6 +637,9 @@ func cmdTerms(ctx context.Context, g *global, args []string) error {
 	}
 	if base == "" {
 		return usage("no host: give its ls_bbox base URL, or set history_host")
+	}
+	if err := checkOrigin(base); err != nil {
+		return err
 	}
 	t, err := reader.FetchTerms(ctx, termsClient(g.cfg.Timeout), base)
 	if errors.Is(err, reader.ErrNoTerms) {

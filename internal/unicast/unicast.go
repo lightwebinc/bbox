@@ -8,7 +8,9 @@
 // and counts the object published once Need hosts took it.
 //
 // A host "took" an object when its answer admits outputs for the topic, or
-// when a lookup at that host answers the object. To a submitter a duplicate
+// when a lookup at that host answers the object; for an envelope, a receipt
+// the host answers that names it counts too, since an acknowledged envelope
+// is no longer open. To a submitter a duplicate
 // and a refusal look the same (an answer that admits nothing: a topic
 // manager raises a refusal, and the engine does not return it as an error),
 // so an answer that admits nothing is confirmed by lookup before it counts.

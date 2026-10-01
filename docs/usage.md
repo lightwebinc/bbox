@@ -233,7 +233,9 @@ the command does not reclaim.
 In mode `unicast` every object goes to each host, retried on its own, and
 is published once `quorum` hosts take it. A host that answers that it
 admitted nothing (a duplicate, or a refusal: they look the same) counts
-only once a lookup at that host answers the object. After each command a
+only once a lookup at that host answers the object; for an envelope, a
+receipt the host answers that names it counts too, since an acknowledged
+envelope is no longer in any box. After each command a
 line per host says what it took and missed:
 
 ```text
@@ -345,7 +347,7 @@ service ls_bbox, terms 1
 history        5 sat a question
 history-after  5 sat a question
 $ bbox history
-paid 5 sat to 03d4f2a9c1b7 in 0e8f...4c21, broadcast by the host
+paid 5 sat to 03d4f2a9c1b7 in 0e8f...4c21, recorded by the host for its payee to settle
 2026-01-05T10:02:11Z  8b0e...12fa  from 02c6...9a1e  box inbox  1874B
 1 envelope(s) the host keeps that are no longer open
 ```
@@ -355,8 +357,9 @@ BRC-104 authentication with the home's identity key. The host answers 402
 with its price and a derivation prefix (BRC-105); the command pays: one
 output to the key BRC-29 derives for the host's identity key, the prefix
 and a suffix of its own, from the pool, unbroadcast, as Atomic BEEF in the
-`x-bsv-payment` header, and asks again. The host verifies the payment,
-records it and answers; the host broadcasts it. A price over `-max-sats`
+`x-bsv-payment` header as output 0, and asks again. The host verifies the payment,
+records it and answers; the host does not broadcast it, and its payee
+settles it (below). A price over `-max-sats`
 (default 1000) is not paid (exit 2); a payment the host does not accept is
 given back to the pool. One payment buys one answer page; `-after
 <created>:<txid>` asks for the next. The free classes are never asked

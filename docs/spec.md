@@ -398,7 +398,9 @@ the current one runs out. The tree's size is the owner's choice and is
 per-carrier overhead ([limits.md](limits.md)).
 
 A funding tree is not published to an office: every carrier carries its own.
-A sweep is published, once, after it mines (section 6.4).
+A sweep is published after it mines (section 6.4), once to each office whose
+carriers it retracts: one tree can fund carriers in several offices, and a
+host learns of a sweep only on an office it carries.
 
 A carrier is published once per destination, naming
 `tm_bbox_<name>_<suffix>` as its first topic (section 9). A host answers a
@@ -546,11 +548,23 @@ refused at one host can ask another. The priceable classes are sold under
 BRC-105: a priced question is asked on the same BRC-24 `/lookup` route as a
 free one, over BRC-104 authentication; the host answers 402 with BRC-105's
 headers (the price, the payee's identity key and the derivation prefix), and
-answers the question once paid. A price is for one question, which is one
+answers the question once paid. The payment is output 0 of the transaction
+the client sends in BRC-105's `x-bsv-payment` header: a P2PKH output of at
+least the price to the key BRC-29 derives for the payee, the prefix, the
+client's suffix and the asker. A host reads no other output, so the rest of
+the transaction (the payer's change) is the payer's, and whoever settles the
+payment internalizes output 0. A price is for one question, which is one
 answer page. A host MAY offer a
 watch stream that notifies a recipient of new envelopes; it is priceable, it
 carries nothing a free class does not answer, and its route and event format
 are not part of this version.
+
+*Note (informative).* A host may record the payments it accepts without
+broadcasting them, settling them later through its payee's wallet (BRC-100
+`internalizeAction`, which broadcasts). Until a payment is broadcast and
+mined, its payer can spend the same inputs elsewhere and the payment is
+then worth nothing, so a host that records payments unbroadcast should
+settle them promptly and on a schedule.
 
 ### 7.4 The host terms document
 
@@ -562,7 +576,14 @@ GET <base>/ls_bbox/terms
 
 where `<base>` is the base URL of `ls_bbox`, the value BRC-180's
 `metanet.overlays` names for it (BRC-180 rule 2: a service defines its own
-routes, and the manifest does not respecify them). The answer is JSON:
+routes, and the manifest does not respecify them). `<base>` is an origin
+(RFC 6454: a scheme, a host and an optional port) with no path, query or
+fragment: a BRC-104 client shakes hands at the origin's
+`/.well-known/auth`, and a BRC-104 signature covers the request path, so
+the terms document, the handshake and the priced `/lookup` are all at the
+origin's root. A client refuses a `<base>` that is not an origin; a host
+behind a reverse proxy is given an origin of its own (a name or a port).
+The answer is JSON:
 
 ```json
 {
@@ -768,7 +789,13 @@ funding output pays for one answered carrier over the host's life, never one
 per retention period. The index keeps up to 8 superseded carriers per
 outpoint as evidence that the owner equivocated (all of them when the
 outpoint's winner is acknowledged, up to 64), counts the rest, and MUST drop
-the rest (section 8.4). A superseded carrier is still admitted, stored until
+the rest (section 8.4). Which superseded carriers are kept depends on the
+order they arrived in: the excess is dropped as it arrives, and a dropped
+carrier offered again is a duplicate, so two hosts that received the same
+carriers in different orders may keep different ones. The statuses of the
+carriers kept do not: the winner is chosen from every commitment the
+outpoint row records, dropped ones included, so a kept carrier's status
+does not depend on which others were kept. A superseded carrier is still admitted, stored until
 it is dropped, and delivered by the plane: what bounds that stream is the
 plane's and the host's rate limits, not postage.
 
@@ -859,7 +886,11 @@ receiving it.
 most 16), retries each on its own, and counts the object published once a
 quorum of hosts took it. A host **took** the object when its answer admits
 outputs for the topic, or when a lookup at that host answers the object (`box`,
-`receipt` or `sweep`). To a submitter, a duplicate and a refusal look the same
+`receipt` or `sweep`). For an envelope, a `receipt` answer at that host
+naming the envelope (an answered receipt whose `by` is the envelope's `to`
+and whose `acks` list its txid) also confirms that the host took it: an
+acknowledged envelope is no longer open, so no `box` question answers it,
+and a resent copy is a duplicate that admits nothing. To a submitter, a duplicate and a refusal look the same
 (an answer that admits nothing: a raised refusal is not returned as an
 error), so an answer that admits nothing is confirmed by lookup before it
 counts. A sweep must reach every host named.

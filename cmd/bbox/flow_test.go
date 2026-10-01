@@ -300,4 +300,40 @@ func TestHistoryHostIsAnOrigin(t *testing.T) {
 	h.identity("bob")
 	h.newOffice("bob")
 	h.want(h.run("bob", "", "history", "-at", "https://terms.example.com/bbox"), exitUsage, "is not an origin")
+	h.want(h.run("bob", "", "terms", "https://terms.example.com/bbox"), exitUsage, "is not an origin")
+	h.want(h.run("bob", "", "terms", "terms.example.com"), exitUsage, "is not an origin")
+}
+
+// In unicast, a host that holds an envelope its recipient acknowledged
+// answers a resend with nothing admitted, and no box question answers the
+// envelope; the receipt naming it confirms that the host took it.
+func TestUnicastAcknowledgedResendIsConfirmed(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	h.env["BBOX_MODE"] = "unicast"
+	delete(h.env, "BBOX_FACADE")
+	// b takes nothing: the envelope reaches a only and stays persisted.
+	h.b.Drop = func(*transaction.Transaction) bool { return true }
+	r := h.run("alice", "", "send", bob, "-m", "one", "-rate", "20", "-tree-count", "4")
+	h.want(r, exitUsage, "1 of 2 host(s) took it and the quorum is 2")
+	m := regexp.MustCompile(`outbox      envelope ([0-9a-f]{64})`).FindStringSubmatch(h.must("alice", "", "doctor").stdout)
+	if m == nil {
+		t.Fatal("the envelope is not persisted")
+	}
+	tx := m[1]
+	// bob reads and acknowledges it at a alone.
+	h.must("bob", "", "-hosts", h.aS.URL, "read", tx)
+	h.must("bob", "", "-hosts", h.aS.URL, "ack", tx)
+	if h.a.Status(tx) != "acknowledged" {
+		t.Fatalf("status at a: %s", h.a.Status(tx))
+	}
+	// b is back: the resend is a duplicate at a, confirmed by the receipt.
+	h.b.Drop = nil
+	r = h.must("alice", "", "send", bob, "-m", "two", "-rate", "20", "-tree-count", "4")
+	if !strings.Contains(r.stdout, "host "+h.aS.URL+": took 2 object(s), missed 0") || !h.b.Holds(tx) {
+		t.Fatalf("resend:\n%s\n%s", r.stdout, r.stderr)
+	}
 }
