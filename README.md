@@ -24,18 +24,23 @@ travel inside an envelope, unbroadcast, for the recipient to internalize.
   each object once and every subscribed host receives it; without it, the
   publisher submits to each host itself.
 - **Reading is free.** The base questions are free on every conforming host;
-  a host may charge for history, never for the inbox.
+  a host may charge for history, never for the inbox, through a BRC-105 402
+  that the client pays and the host's payee settles.
+- **Retraction is a mined sweep.** A sender takes an envelope back by
+  spending its funding output; honest hosts stop answering it. It is not
+  erasure.
 
 ## Documentation
 
 | If you want to | Read |
 | --- | --- |
 | Try it on one machine in minutes, with no coin | [QUICKSTART.md](QUICKSTART.md) |
-| Send, read, acknowledge, pay and be paid with the `bbox` command | [docs/usage.md](docs/usage.md) |
+| Understand it and use it day to day: concepts, sending, reading, paying, retracting, troubleshooting | [docs/user-guide.md](docs/user-guide.md) |
+| Look up a command, a flag, a setting or an exit code | [docs/usage.md](docs/usage.md) |
 | Implement a compatible sender, reader or host | [docs/spec.md](docs/spec.md) (the specification) |
 | Know what cannot change once published | [docs/frozen.md](docs/frozen.md) |
 | Know the defaults and caps, and why each is set where it is | [docs/limits.md](docs/limits.md) |
-| Run a host: the module, its configuration, the terms route | [docs/host.md](docs/host.md) |
+| Run a host: the module, its configuration, the terms route, settling, backups, metrics | [docs/host.md](docs/host.md) |
 
 ## Build and test
 

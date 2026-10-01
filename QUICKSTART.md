@@ -188,4 +188,10 @@ $ docker compose --profile cli down -v
   each object is submitted once and every subscribed host receives it.
 - **Hosts.** A host is the `bbox-host` image, or the module on any
   reference overlay host (docs/host.md); a host that prices a question
-  settles on a schedule.
+  settles on a schedule, and backs up its state directory daily.
+- **A host that missed something.** In unicast a host that was down misses
+  what was sent meanwhile; `bbox list -fill` copies an envelope one host
+  has across to one that lacks it.
+- **Next.** [docs/user-guide.md](docs/user-guide.md) explains the concepts
+  and the day-to-day use; [docs/limits.md](docs/limits.md) every default
+  and cap.

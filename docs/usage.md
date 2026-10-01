@@ -138,7 +138,7 @@ quorum       = all
 | Code | Meaning |
 | --- | --- |
 | 0 | done, or everything asked verified and the hosts agree |
-| 1 | refused: a host answered something that does not verify (it is not shown), a message or a payment the recipient's checks refuse, or a payment the network refuses |
+| 1 | refused: a host answered something that does not verify (it is not shown), a message or a payment the recipient's checks refuse, or a sweep or a payment the network refuses |
 | 2 | usage, configuration, local or transport error, a quorum not met, or a price over `-max-sats`; what was persisted is published by the next command |
 | 3 | incomplete: the hosts disagree, a host could not be asked, or no host answers what was named. It proves nothing either way |
 
