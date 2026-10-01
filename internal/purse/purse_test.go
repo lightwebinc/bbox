@@ -19,6 +19,7 @@ import (
 	"github.com/lightwebinc/bcommon/producer"
 	"github.com/lightwebinc/bcommon/publish"
 
+	"github.com/lightwebinc/bbox/internal/efraw"
 	"github.com/lightwebinc/bbox/internal/send"
 	"github.com/lightwebinc/bbox/internal/testchain"
 )
@@ -34,7 +35,7 @@ func newRig(t *testing.T) *rig {
 	c := testchain.New(700)
 	s := httptest.NewServer(c)
 	t.Cleanup(s.Close)
-	return &rig{chain: c, asset: &nodeapi.Asset{Base: s.URL}, rpc: &nodeapi.RPC{URL: s.URL + "/rpc", ID: "t"}}
+	return &rig{chain: c, asset: efraw.Asset(s.URL), rpc: &nodeapi.RPC{URL: s.URL + "/rpc", ID: "t"}}
 }
 
 // purse is a funded home as a Purse.

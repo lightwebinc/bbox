@@ -399,7 +399,9 @@ func (c *Chain) asset(w http.ResponseWriter, r *http.Request, p string) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write(tx.Bytes())
+		// As a Teranode asset API answers: Extended Format, coinbases
+		// included (a zero previous output for the coinbase input).
+		_, _ = w.Write(c.ef(tx))
 	case strings.HasPrefix(p, "block/"):
 		hash := strings.TrimSuffix(strings.TrimPrefix(p, "block/"), "/json")
 		h, ok := c.blockAt(hash)
@@ -438,4 +440,25 @@ func (c *Chain) asset(w http.ResponseWriter, r *http.Request, p string) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// ef is tx in Extended Format, each input carrying the output it spends
+// (a zero output when the chain does not hold it, as for a coinbase).
+func (c *Chain) ef(tx *transaction.Transaction) []byte {
+	cp, err := transaction.NewTransactionFromBytes(tx.Bytes())
+	if err != nil {
+		panic(err)
+	}
+	for _, in := range cp.Inputs {
+		out := &transaction.TransactionOutput{LockingScript: &script.Script{}}
+		if src, ok := c.txs[in.SourceTXID.String()]; ok && int(in.SourceTxOutIndex) < len(src.Outputs) {
+			out = src.Outputs[in.SourceTxOutIndex]
+		}
+		in.SetSourceTxOutput(out)
+	}
+	b, err := cp.EF()
+	if err != nil {
+		panic(err)
+	}
+	return b
 }

@@ -24,6 +24,7 @@ import (
 
 	"github.com/lightwebinc/bbox/internal/boxrec"
 	"github.com/lightwebinc/bbox/internal/config"
+	"github.com/lightwebinc/bbox/internal/efraw"
 	"github.com/lightwebinc/bbox/internal/limits"
 	"github.com/lightwebinc/bbox/internal/reader"
 	"github.com/lightwebinc/bbox/internal/send"
@@ -96,7 +97,9 @@ func (g *global) node(needRPC bool) (*nodeapi.RPC, *nodeapi.Asset, error) {
 	if g.cfg.RPC != "" {
 		rpc = &nodeapi.RPC{URL: g.cfg.RPC, User: g.cfg.RPCUser, Pass: g.cfg.RPCPass, ID: "bbox"}
 	}
-	return rpc, &nodeapi.Asset{Base: g.cfg.Asset}, nil
+	// A Teranode asset API answers a raw transaction in Extended Format,
+	// which bcommon's guard refuses: efraw hands it on as plain raw bytes.
+	return rpc, efraw.Asset(g.cfg.Asset), nil
 }
 
 // settler is the configured settlement leg.
@@ -541,7 +544,7 @@ func cmdDoctor(ctx context.Context, g *global, args []string) error {
 	}
 	var tip uint32
 	if g.cfg.Asset != "" {
-		if h, err := (&nodeapi.Asset{Base: g.cfg.Asset}).BestHeader(ctx); err != nil {
+		if h, err := efraw.Asset(g.cfg.Asset).BestHeader(ctx); err != nil {
 			fmt.Fprintf(out, "node        %s: %v\n", g.cfg.Asset, err)
 		} else {
 			tip = h.Height
