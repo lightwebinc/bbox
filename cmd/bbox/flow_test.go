@@ -526,9 +526,14 @@ func TestSettleBroadcastsThenWaitsTogether(t *testing.T) {
 			if err := os.WriteFile(ledger, h.paid.Ledger(), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			// The same ledger twice, as two hosts' files: each payment once.
+			copyOf := filepath.Join(h.dir, "payments-b.jsonl")
+			if err := os.WriteFile(copyOf, h.paid.Ledger(), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			h.chain.SetHold(true)
 			done := make(chan result, 1)
-			go func() { done <- h.run("payee", "", "payee", "settle", ledger, "-in-flight", c.inFlight) }()
+			go func() { done <- h.run("payee", "", "payee", "settle", ledger, copyOf, "-in-flight", c.inFlight) }()
 			deadline := time.After(30 * time.Second)
 			most := 0
 			for {
@@ -662,5 +667,62 @@ func TestSettleReportsADoubleSpentPaymentOnce(t *testing.T) {
 				t.Fatalf("settle again:\n%s\n%s", r.stdout, r.stderr)
 			}
 		})
+	}
+}
+
+// A drop whose only coins are change from a transaction not yet mined (a
+// tree minted ahead took the last proven coin) waits for that change to
+// mine and then sweeps, rather than failing for want of a fee.
+func TestDropWaitsForChangeToMine(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	h.identity("alice")
+	first := h.send("alice", bob, "one", "-tree-count", "4")
+	// The second send leaves two outputs and mints the next tree ahead
+	// from the one coin, and that tree is held unmined.
+	h.chain.SetHold(true)
+	h.send("alice", bob, "two", "-tree-count", "4")
+	if h.chain.Waiting() == 0 {
+		t.Fatal("no tree was minted ahead")
+	}
+	// Every other coin is gone: what is left is that tree's change.
+	wf := filepath.Join(h.dir, "alice", "wallet.json")
+	raw, err := os.ReadFile(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var w struct {
+		Outputs []map[string]any `json:"outputs"`
+	}
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatal(err)
+	}
+	var left []map[string]any
+	for _, o := range w.Outputs {
+		if o["unproven"] == true {
+			left = append(left, o)
+		}
+	}
+	if len(left) != 1 {
+		t.Fatalf("%d unproven coins, want the ahead tree's change", len(left))
+	}
+	w.Outputs = left
+	if raw, err = json.Marshal(w); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wf, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.want(h.run("alice", "", "doctor"), 0, "pool        1 output(s)")
+	go func() {
+		time.Sleep(3 * time.Second)
+		h.chain.SetHold(false)
+		h.chain.Mine()
+	}()
+	r := h.must("alice", "", "drop", first)
+	if !strings.Contains(r.stderr, "waiting for one") || !strings.Contains(r.stdout, "retracted 1 funding output(s)") {
+		t.Fatalf("drop:\n%s\n%s", r.stdout, r.stderr)
 	}
 }

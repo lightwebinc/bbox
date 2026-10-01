@@ -25,7 +25,7 @@ import (
 )
 
 const payeeHelp = `usage: bbox payee key -out FILE
-       bbox payee settle <payments.jsonl> [-in-flight N]
+       bbox payee settle <payments.jsonl>... [-in-flight N]
 
 A host that prices a question is paid to its payee key (BBOX_PAYEE_KEY):
 each payment is a BRC-29 output to a key derived from it, recorded by the
@@ -37,16 +37,18 @@ key writes BBOX_PAYEE_KEY=<this home's identity private key> to FILE (mode
 0600, never over an existing file), or with -out - to standard output, for
 the host's environment: the home is then the payee's wallet.
 
-settle takes every payment in the ledger that this home has not settled
-into the home's wallet: each is checked to pay the key this identity
-derives for its remittance and payer, verified against the headers,
-broadcast through the settlement leg, waited for until it mines, and added
-to the pool, and its txid is recorded in the home as settled. Every
-payment is broadcast before any is waited for, so a run takes about one
-block however many there are; -in-flight (default 16, at most 64) bounds
-how many are broadcast and not yet mined at once. A payment the network
-refuses (its inputs spent elsewhere) is reported and left unsettled. Run it on a schedule: the sooner a payment is settled, the
-shorter the window in which the payer can take it back.`
+settle takes every payment in the ledgers (one or more hosts' files; a
+payment in two is settled once) that this home has not settled into the
+home's wallet: each is checked to pay the key this identity derives for
+its remittance and payer, verified against the headers, broadcast through
+the settlement leg, waited for until it mines, and added to the pool, and
+its txid is recorded in the home as settled. Every payment is broadcast
+before any is waited for, so a run takes about one block however many
+there are; -in-flight (default 16, at most 64) bounds how many are
+broadcast and not yet mined at once. A payment the network refuses for
+good (its payer spent the inputs elsewhere) is reported once, recorded,
+and passed over by later runs. Run it on a schedule: the sooner a payment
+is settled, the shorter the window in which the payer can take it back.`
 
 func cmdPayee(ctx context.Context, g *global, args []string) error {
 	fs := g.flagSet("payee", payeeHelp)
@@ -59,13 +61,13 @@ func cmdPayee(ctx context.Context, g *global, args []string) error {
 	switch {
 	case len(pos) == 1 && pos[0] == "key":
 		return payeeKey(g, *out)
-	case len(pos) == 2 && pos[0] == "settle":
+	case len(pos) >= 2 && pos[0] == "settle":
 		if *inFlight < 1 || *inFlight > limits.MaxSettleInFlight {
 			return usage("-in-flight %d is outside 1 to %d: payments broadcast and not yet mined at once (docs/limits.md)", *inFlight, limits.MaxSettleInFlight)
 		}
-		return payeeSettle(ctx, g, pos[1], *inFlight)
+		return payeeSettle(ctx, g, pos[1:], *inFlight)
 	}
-	return usage("payee key -out FILE | payee settle <payments.jsonl>")
+	return usage("payee key -out FILE | payee settle <payments.jsonl>...")
 }
 
 // payeeKey writes the home's identity private key as BBOX_PAYEE_KEY.
@@ -124,32 +126,22 @@ type ledgerLine struct {
 }
 
 // payeeSettle internalizes every payment in the ledger this home has not.
-func payeeSettle(ctx context.Context, g *global, path string, inFlight int) error {
-	f, err := os.Open(path) //nolint:gosec // the operator's own path
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+func payeeSettle(ctx context.Context, g *global, paths []string, inFlight int) error {
 	var lines []ledgerLine
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1<<20), 16<<20)
-	n := 0
-	for sc.Scan() {
-		n++
-		t := strings.TrimSpace(sc.Text())
-		if t == "" {
-			continue
+	seen := map[string]bool{}
+	for _, path := range paths {
+		ls, err := readLedger(g, path)
+		if err != nil {
+			return err
 		}
-		var l ledgerLine
-		if err := json.Unmarshal([]byte(t), &l); err != nil || l.Txid == "" {
-			// A line cut short by a crash: its question was never answered.
-			g.say("%s line %d: not a payment; skipped", path, n)
-			continue
+		for _, l := range ls {
+			// The same payment in two ledgers (a copy, or two hosts sharing
+			// one) is settled once.
+			if !seen[l.Txid] {
+				seen[l.Txid] = true
+				lines = append(lines, l)
+			}
 		}
-		lines = append(lines, l)
-	}
-	if err := sc.Err(); err != nil {
-		return err
 	}
 	h, err := g.openHome()
 	if err != nil {
@@ -256,6 +248,34 @@ func payeeSettle(ctx context.Context, g *global, path string, inFlight int) erro
 		return refused("%d payment(s) not settled: until one is, its payer can spend the coins elsewhere", failed)
 	}
 	return nil
+}
+
+// readLedger reads a host's payments.jsonl, passing over a line that does
+// not parse: one cut short by a crash, whose question was never answered.
+func readLedger(g *global, path string) ([]ledgerLine, error) {
+	f, err := os.Open(path) //nolint:gosec // the operator's own path
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var lines []ledgerLine
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 16<<20)
+	n := 0
+	for sc.Scan() {
+		n++
+		t := strings.TrimSpace(sc.Text())
+		if t == "" {
+			continue
+		}
+		var l ledgerLine
+		if err := json.Unmarshal([]byte(t), &l); err != nil || l.Txid == "" {
+			g.say("%s line %d: not a payment; skipped", path, n)
+			continue
+		}
+		lines = append(lines, l)
+	}
+	return lines, sc.Err()
 }
 
 func checkPayment(ctx context.Context, g *global, p *purse.Purse, l ledgerLine) (*purse.Incoming, error) {

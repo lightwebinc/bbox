@@ -171,9 +171,11 @@ checks that output 0 pays the key the home derives for the prefix, the
 suffix and the payer, verifies it against the home's headers, broadcasts it
 through the home's settlement leg, waits for its proof, adds it to the
 home's pool, and records its txid in the home as settled. It needs the
-home's `header_url`, `asset` and `settle` ([usage.md](usage.md)). Every
-payment is broadcast before any is waited for, so a run takes about one
-block however many lines it settles; `-in-flight` (default 16, at most 64)
+home's `header_url`, `asset` and `settle` ([usage.md](usage.md)). One
+payee serving several hosts names every host's ledger in one run (`payee
+settle a/payments.jsonl b/payments.jsonl`); a payment in two is settled
+once. Every payment is broadcast before any is waited for, so a run takes
+about one block however many lines it settles; `-in-flight` (default 16, at most 64)
 bounds how many are broadcast and not yet mined at once.
 
 **A payment its payer double-spent before settle.** The payer can spend

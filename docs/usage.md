@@ -58,7 +58,7 @@ variables.
 | `history` | yes | `office`, `history_host`, `header_url`, `asset`, `settle` | the priced question: pays the host's 402 from the pool, prints what the host keeps that is no longer open |
 | `terms [URL]` | no | `history_host` or URL | prints a host's terms document |
 | `payee key -out FILE` | yes | nothing | writes `BBOX_PAYEE_KEY` for this home's identity to a new file, mode 0600 |
-| `payee settle <payments.jsonl>` | yes, the payee's | `header_url`, `asset`, `settle` | internalizes every payment in a host's ledger this home has not: all broadcast, then awaited together (`-in-flight`) |
+| `payee settle <payments.jsonl>...` | yes, the payee's | `header_url`, `asset`, `settle` | internalizes every payment in a host's ledger this home has not: all broadcast, then awaited together (`-in-flight`) |
 | `doctor` | optional | nothing | the home's state and whether the node, headers, hosts and priced host answer; reads only |
 | `version` | no | nothing | prints the version |
 
@@ -423,7 +423,9 @@ the run that finds it. One that merely did not mine in time is `NOT
 SETTLED`, tried again next run, exit 1. It checks every payment first, broadcasts
 them all, and then waits for their proofs together, so a run takes about
 one block however many it settles; `-in-flight N` (default 16, at most 64)
-bounds how many are broadcast and not yet mined at once. docs/host.md says
+bounds how many are broadcast and not yet mined at once. It takes several
+ledgers at once (one payee for several hosts), settling a payment found in
+two only once. docs/host.md says
 how a host is configured with the key.
 
 ## Doctor

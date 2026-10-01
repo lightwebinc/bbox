@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/lightwebinc/bcommon/carrier"
 	"github.com/lightwebinc/bcommon/funding"
 	"github.com/lightwebinc/bcommon/guard"
+	"github.com/lightwebinc/bcommon/mint"
+	"github.com/lightwebinc/bcommon/producer"
 
 	"github.com/lightwebinc/bbox/internal/state"
 )
@@ -63,20 +66,10 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 	if err != nil {
 		return nil, err
 	}
-	before := e.Pool.Outputs()
 	payer := e.NewPayer()
-	fee, err := payer.Take(ctx)
+	fee, coin, err := e.sweepFee(ctx, payer)
 	if err != nil {
 		return nil, FeeError(fmt.Errorf("sweep fee: %w", err))
-	}
-	// The coin as the pool held it, so a refused sweep can give it back.
-	var coin *bwallet.Output
-	feeOp := fmt.Sprintf("%s.%d", fee.Tx.TxID(), fee.Vout)
-	for i := range before {
-		if before[i].Outpoint() == feeOp {
-			coin = &before[i]
-			break
-		}
 	}
 	change, err := e.Signer.FundScript()
 	if err != nil {
@@ -105,6 +98,50 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 		return &e.St.Sweeps[len(e.St.Sweeps)-1], err
 	}
 	return &e.St.Sweeps[len(e.St.Sweeps)-1], nil
+}
+
+// sweepFee takes the sweep's fee coin, and the coin as the pool held it,
+// so a refused sweep can give it back. When every coin left is change from
+// a transaction not yet mined (a tree minted ahead took the last proven
+// coin, say), it waits up to Opts.Wait for that change to mine rather than
+// fail: a drop waits for a block anyway.
+func (e *Engine) sweepFee(ctx context.Context, payer *producer.Payer) (mint.Input, *bwallet.Output, error) {
+	var deadline time.Time
+	for {
+		before := e.Pool.Outputs()
+		fee, err := payer.Take(ctx)
+		var nc *producer.NoCoinError
+		if errors.As(err, &nc) && nc.Held > 0 {
+			if deadline.IsZero() {
+				deadline = time.Now().Add(e.Opts.Wait)
+				e.note("sweep fee: every coin is change from %d transaction(s) not yet mined; waiting for one", nc.Held)
+			}
+			if time.Now().After(deadline) {
+				return mint.Input{}, nil, err
+			}
+			poll := e.Opts.Poll
+			if poll <= 0 {
+				poll = producer.DefaultPoll
+			}
+			select {
+			case <-ctx.Done():
+				return mint.Input{}, nil, ctx.Err()
+			case <-time.After(poll):
+			}
+			CollectChange(ctx, e.Pool, e.Legs.Asset)
+			continue
+		}
+		if err != nil {
+			return mint.Input{}, nil, err
+		}
+		op := fmt.Sprintf("%s.%d", fee.Tx.TxID(), fee.Vout)
+		for i := range before {
+			if before[i].Outpoint() == op {
+				return fee, &before[i], nil
+			}
+		}
+		return fee, nil, nil
+	}
 }
 
 // FinishSweep takes the sweep in flight, if any, through settlement, its

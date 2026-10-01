@@ -69,7 +69,7 @@ reading (the home's key is the recipient):
 
 a host's payee:
   payee key -out FILE          write BBOX_PAYEE_KEY for this home's identity
-  payee settle <payments.jsonl>
+  payee settle <payments.jsonl>...
                                take every payment a host accepted into the wallet
 
   version                      print the version
