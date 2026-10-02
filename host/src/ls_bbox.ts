@@ -353,7 +353,7 @@ export class BboxLookupService implements LookupService {
       if (input === undefined || src === undefined) return false
       const op = outpoint(src, input.sourceOutputIndex)
       const c = toHex(Uint8Array.from(tx.hash() as number[]))
-      const record = firstPush(script, 35)!
+      const record = firstPush(script)!
       let line: CarrierLine
       let entry: { e?: EnvEntry; r?: RcptEntry }
       if (kind === 'envelope') {

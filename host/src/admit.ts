@@ -173,7 +173,7 @@ function checkCarrier(raw: Uint8Array, beef: Beef, tx: Transaction, claim: Kind,
   checkCarrierBEEF(raw, beef, tx)
   // 3. the record's own rules.
   const lock = bin(out.lockingScript)
-  const record = firstPush(lock, 35)!
+  const record = firstPush(lock)!
   let c: Carrier
   let office: string
   const parent = input.sourceTXID ?? input.sourceTransaction!.id('hex')

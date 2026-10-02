@@ -7,9 +7,9 @@ import (
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
+	"github.com/lightwebinc/bcommon/chainview"
 	"github.com/lightwebinc/bcommon/termsafe"
 
-	"github.com/lightwebinc/bbox/internal/chainview"
 	"github.com/lightwebinc/bbox/internal/state"
 )
 

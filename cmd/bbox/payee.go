@@ -17,10 +17,10 @@ import (
 	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
+	"github.com/lightwebinc/bcommon/purse"
 	"github.com/lightwebinc/bcommon/termsafe"
 
 	"github.com/lightwebinc/bbox/internal/limits"
-	"github.com/lightwebinc/bbox/internal/purse"
 	"github.com/lightwebinc/bbox/internal/state"
 )
 
@@ -228,7 +228,7 @@ func payeeSettle(ctx context.Context, g *global, paths []string, inFlight int) e
 			continue
 		}
 		if err != nil {
-			notSettled(r.l, err)
+			notSettled(r.l, payWords(err, 0))
 			continue
 		}
 		h.st.Settled = append(h.st.Settled, r.l.Txid)
@@ -297,4 +297,20 @@ func checkPayment(ctx context.Context, g *global, p *purse.Purse, l ledgerLine) 
 		return nil, fmt.Errorf("the ledger names %s and its BEEF holds %s", l.Txid, in.Txid)
 	}
 	return in, nil
+}
+
+// payWords puts a refusal of the purse in this command's words. The library
+// names no flag and no config key; the command that set them does.
+func payWords(err error, maxSats uint64) error {
+	switch {
+	case errors.Is(err, purse.ErrOverMaxPay):
+		return fmt.Errorf("%w: more than the %d this command may pay (-max-sats)", err, maxSats)
+	case errors.Is(err, purse.ErrNoNode):
+		return fmt.Errorf("%w (config key asset)", err)
+	case errors.Is(err, purse.ErrNoSettler):
+		return fmt.Errorf("%w (config key settle)", err)
+	case errors.Is(err, purse.ErrNotMined):
+		return fmt.Errorf("%w; run the command again to take it into the pool once it is", err)
+	}
+	return err
 }

@@ -11,7 +11,7 @@
  * the CBOR decoder runs. Decoding follows the refusal order of spec section
  * 3.1 step for step, so both codecs refuse a record for the same reason.
  */
-import { CborError, CborMap, bytesEqual, decodeValue, encode, strictPublicKey, type Pair, type Value } from '@lightwebinc/bcommon'
+import { CborMap, claimsRecord, encode, firstPush as sharedFirstPush, recordReader, strictPublicKey, type Pair } from '@lightwebinc/bcommon'
 
 /** The BRC-43 protocol, security level 1, and the key ids under it. */
 export const ProtocolName = 'bbox message'
@@ -190,83 +190,16 @@ export function checkBox(s: string): void {
   checkName(s, MaxBox, true, 'box')
 }
 
-/** Keys a record carries by number, and the ones above the last defined. */
-interface Fields {
-  known: Map<number, Value>
-  extra: Pair[]
-}
-
-/** Refusal steps 1 to 3: the bound, one canonical CBOR map, at most MaxKeys entries. */
-function decodeMap(b: Uint8Array, max: number): CborMap {
-  if (b.length > max) throw new Refusal('too-large')
-  let v: Value
-  try {
-    v = decodeValue(b)
-  } catch (e) {
-    if (e instanceof CborError) throw new Refusal('cbor', e.message)
-    throw e
-  }
-  if (!(v instanceof CborMap)) throw new Refusal('cbor', 'not a map')
-  if (v.entries.length > MaxKeys) throw new Refusal('too-large', `more than ${MaxKeys} keys`)
-  return v
-}
-
-/** Step 4: every key an unsigned integer; those above last are preserved. */
-function intKeys(m: CborMap, last: bigint): Fields {
-  const known = new Map<number, Value>()
-  const extra: Pair[] = []
-  for (const p of m.entries) {
-    if (typeof p.key !== 'bigint' || p.key < 0n) throw new Refusal('key-type')
-    if (p.key > last) {
-      extra.push(p)
-      continue
-    }
-    known.set(Number(p.key), p.val)
-  }
-  return { known, extra }
-}
-
-/** Step 5. */
-function checkMagic(f: Fields, magic: Uint8Array): void {
-  const b = f.known.get(0)
-  if (!(b instanceof Uint8Array) || !bytesEqual(b, magic)) throw new Refusal('magic')
-}
-
-function present(f: Fields, k: number): Value {
-  const v = f.known.get(k)
-  if (v === undefined) throw new Refusal('missing', `key ${k}`)
-  return v
-}
-
-function needBytes(f: Fields, k: number): Uint8Array {
-  const v = present(f, k)
-  if (!(v instanceof Uint8Array)) throw new Refusal('type', `key ${k}`)
-  return v
-}
-
-function needText(f: Fields, k: number): string {
-  const v = present(f, k)
-  if (typeof v !== 'string') throw new Refusal('type', `key ${k}`)
-  return v
-}
-
-function needUint(f: Fields, k: number, lo: number, hi: number): number {
-  const v = present(f, k)
-  if (typeof v !== 'bigint' || v < 0n) throw new Refusal('type', `key ${k}`)
-  if (v < BigInt(lo) || v > BigInt(hi)) throw new Refusal('range', `key ${k}`)
-  return Number(v)
-}
-
-function inRange(n: number, lo: number, hi: number, what: string): void {
-  if (!Number.isSafeInteger(n) || n < lo || n > hi) throw new Refusal('range', what)
-}
-
-/** Preserved keys sit above the known ones, so re-encoding cannot shadow one. */
-function checkExtra(extra: Pair[], last: bigint): void {
-  for (const p of extra) {
-    if (typeof p.key !== 'bigint' || p.key <= last) throw new Refusal('key-type')
-  }
-}
+const rec = recordReader((reason, detail) => new Refusal(reason as Reason, detail))
+const decodeMap = rec.decodeMap
+const intKeys = rec.split
+const checkMagic = rec.checkMagic
+const present = rec.need
+const needBytes = rec.bytes
+const needText = rec.text
+const needUint = rec.uint
+const inRange = rec.inRange
+const checkExtra = rec.checkExtraKeys
 
 /** One envelope record: the payload of one envelope carrier. */
 export interface Envelope {
@@ -419,21 +352,7 @@ export function decodeReceipt(b: Uint8Array): Receipt {
 /** What an output claims to carry. */
 export type Kind = 'none' | 'envelope' | 'receipt'
 
-/**
- * A definite-length map head (0xa0 to 0xbb), key 0, then a four-byte
- * string equal to magic. Key 0 always sorts first in a canonical map with
- * unsigned-integer keys.
- */
-function claims(p: Uint8Array, magic: Uint8Array): boolean {
-  if (p.length < 1 || p[0]! >> 5 !== 5) return false
-  const ai = p[0]! & 0x1f
-  let i: number
-  if (ai < 24) i = 1
-  else if (ai <= 27) i = 1 + (1 << (ai - 24))
-  else return false
-  if (p.length < i + 2 + magic.length || p[i] !== 0x00 || p[i + 1] !== 0x44) return false
-  return bytesEqual(p.subarray(i + 2, i + 2 + magic.length), magic)
-}
+const claims = claimsRecord
 
 export const isEnvelope = (p: Uint8Array): boolean => claims(p, MagicEnvelope)
 export const isReceipt = (p: Uint8Array): boolean => claims(p, MagicReceipt)
@@ -446,34 +365,13 @@ export function claimOfField(p: Uint8Array): Kind {
 }
 
 /**
- * The push at s[i]: an opcode 0x01 to 0x4b pushing that many bytes, or
- * OP_PUSHDATA1, 2 or 4 with a little-endian length, every byte present.
- */
-export function firstPush(s: Uint8Array, i: number): Uint8Array | undefined {
-  if (i >= s.length) return undefined
-  const op = s[i++]!
-  let n: number
-  if (op >= 0x01 && op <= 0x4b) n = op
-  else if (op === 0x4c && i + 1 <= s.length) n = s[i++]!
-  else if (op === 0x4d && i + 2 <= s.length) {
-    n = s[i]! | (s[i + 1]! << 8)
-    i += 2
-  } else if (op === 0x4e && i + 4 <= s.length) {
-    n = (s[i]! | (s[i + 1]! << 8) | (s[i + 2]! << 16)) + s[i + 3]! * 0x1000000
-    if (n > s.length) return undefined
-    i += 4
-  } else return undefined
-  if (n > s.length - i) return undefined
-  return s.subarray(i, i + n)
-}
-
-/**
  * The admission classifier over raw locking-script bytes (spec section
  * 8.1): a 33-byte push, OP_CHECKSIG, then one push whose data a record's
  * claim prefix begins. Nothing else about the script is read here.
  */
 export function claimOf(s: Uint8Array): Kind {
-  if (s.length < 35 || s[0] !== 0x21 || s[34] !== 0xac) return 'none'
-  const f = firstPush(s, 35)
+  const f = sharedFirstPush(s)
   return f === undefined ? 'none' : claimOfField(f)
 }
+
+export const firstPush = sharedFirstPush

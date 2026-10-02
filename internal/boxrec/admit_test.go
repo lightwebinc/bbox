@@ -59,20 +59,6 @@ func TestPushDropScriptMatchesSDK(t *testing.T) {
 	}
 }
 
-func TestParseScriptRefusesTruncation(t *testing.T) {
-	for _, s := range [][]byte{
-		{0x05, 1, 2},
-		{script.OpPUSHDATA1},
-		{script.OpPUSHDATA1, 3, 1},
-		{script.OpPUSHDATA2, 0xff},
-		{script.OpPUSHDATA4, 0xff, 0xff, 0xff, 0xff, 0},
-	} {
-		if _, ok := parseScript(s); ok {
-			t.Errorf("%x parsed", s)
-		}
-	}
-}
-
 // TestIsFundingShape: only the exact funding script under a canonical key.
 func TestIsFundingShape(t *testing.T) {
 	priv, _ := ec.PrivateKeyFromBytes(bytes.Repeat([]byte{0x42}, 32))

@@ -23,11 +23,11 @@ import (
 	"github.com/lightwebinc/bcommon/lookup"
 	"github.com/lightwebinc/bcommon/mint"
 	"github.com/lightwebinc/bcommon/producer"
+	"github.com/lightwebinc/bcommon/purse"
 	"github.com/lightwebinc/bcommon/termsafe"
 
 	"github.com/lightwebinc/bbox/internal/boxrec"
 	"github.com/lightwebinc/bbox/internal/limits"
-	"github.com/lightwebinc/bbox/internal/purse"
 	"github.com/lightwebinc/bbox/internal/reader"
 	"github.com/lightwebinc/bbox/internal/send"
 	"github.com/lightwebinc/bbox/internal/state"
@@ -510,7 +510,7 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 		if errors.As(err, &re) || strings.Contains(err.Error(), "spent its inputs") {
 			return refused("%v: the payment is reclaimed or double-spent", err)
 		}
-		return err
+		return payWords(err, 0)
 	}
 	rec := h.st.Remember(state.Received{Txid: it.Txid, Office: e.Office, From: hex.EncodeToString(e.From), Box: e.Box, Created: e.Created, Expires: e.Expires, Paid: m.Paid()})
 	rec.Internalized, rec.Beef = m.Payment.TxID().String(), ""
@@ -604,7 +604,7 @@ func cmdHistory(ctx context.Context, g *global, args []string) error {
 		Method: http.MethodPost, Headers: map[string]string{"content-type": "application/json"}, Body: body})
 	if err != nil {
 		p.Refund()
-		return fmt.Errorf("history at %s: %w", base, err)
+		return fmt.Errorf("history at %s: %w", base, payWords(err, *maxSats))
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))

@@ -16,6 +16,8 @@ import (
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
 	"github.com/lightwebinc/bcommon/pushdrop"
+
+	"github.com/lightwebinc/bcommon/record"
 )
 
 // Registry values (docs/frozen.md); frozen once the first record is
@@ -115,13 +117,13 @@ const (
 
 // The refusals. A host counts them by Reason.
 var (
-	ErrTooLarge = errors.New("boxrec: record exceeds its bound")
-	ErrCBOR     = errors.New("boxrec: not a canonical CBOR map")
-	ErrKeyType  = errors.New("boxrec: record key is not an unsigned integer")
-	ErrMagic    = errors.New("boxrec: wrong magic")
-	ErrMissing  = errors.New("boxrec: required key missing")
-	ErrType     = errors.New("boxrec: field has the wrong type")
-	ErrRange    = errors.New("boxrec: field out of range")
+	ErrTooLarge = record.ErrTooLarge
+	ErrCBOR     = record.ErrCBOR
+	ErrKeyType  = record.ErrKeyType
+	ErrMagic    = record.ErrMagic
+	ErrMissing  = record.ErrMissing
+	ErrType     = record.ErrType
+	ErrRange    = record.ErrRange
 	ErrIdentity = errors.New("boxrec: identity key is not a canonical compressed key")
 	ErrOffice   = errors.New("boxrec: office identifier breaks the grammar")
 	ErrBox      = errors.New("boxrec: box name breaks the grammar")

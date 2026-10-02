@@ -15,6 +15,7 @@ import (
 
 	"github.com/lightwebinc/bcommon/carrier"
 	"github.com/lightwebinc/bcommon/guard"
+	"github.com/lightwebinc/bcommon/pushdrop"
 )
 
 // The transaction refusals of docs/spec.md section 8.1, beside the record
@@ -225,7 +226,7 @@ func checkCarrier(raw []byte, b *transaction.Beef, tx *transaction.Transaction, 
 		return nil, err
 	}
 	// 3. the record's own rules.
-	record, _ := firstPush(*out.LockingScript, 35)
+	record, _ := pushdrop.FirstPush(*out.LockingScript)
 	c := &Carrier{Record: record, Commitment: carrier.Commitment(tx),
 		Funding: transaction.Outpoint{Txid: *in.SourceTXID, Index: in.SourceTxOutIndex}}
 	var office string
