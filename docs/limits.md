@@ -58,6 +58,8 @@ environment ([host.md](host.md)); a client cannot change it.
 
 | Limit | Default | Hard cap | Why | Plane and unicast |
 | --- | --- | --- | --- | --- |
+| Payments one coin can make to one host | one | none | Two unbroadcast payments spending one coin both verify and only one can mine: the host refuses the second (409) | Not on the plane |
+| `bbox history` refused for its session's budget (429) | waits as the host says, 1 to 30 s, and asks once more | one retry | A second refusal ends the command, exit 3; nothing was paid for a refused request | Not on the plane |
 | Price the client pays for one priced question (`-max-sats`) | 1000 sat | the flag | A price is per question (one page); a host that asks more is asked by the user, never paid by default | Not on the plane: the terms route is HTTP |
 | Payments one `payee settle` has broadcast and not yet mined (`-in-flight`) | 16 | 1 to 64 | All are broadcast before any is waited for, so a run takes about one block; each in flight is a proof poll against the node until its block | Not on the plane |
 | Wait for a payment to mine | 10 min | fixed | Past it the payment is `NOT SETTLED` and tried again next run. A payment whose input is spent elsewhere is refused at once, recorded, and never tried again | Not on the plane |
@@ -70,8 +72,11 @@ environment ([host.md](host.md)); a client cannot change it.
 | Retention of what a host no longer answers (`BBOX_RETENTION_DAYS`) | 31 days from first sight | at least 31 (spec section 8.4) | A receipt must outlive every envelope it names; open envelopes are always kept until they leave the 30-day answer window. The `history` classes are what longer retention sells | Same |
 | Superseded carriers per funding output | 8 (64 once its winner is acknowledged) | spec | Bounds what one funding output can make a host keep | Same |
 | Outpoint rows (`outpoints.jsonl`) | kept for the host's life | none | It is what keeps a funding output from paying for a second answered carrier (spec section 8.2); back it up ([host.md](host.md)) | Same |
+| Carrier lines held in memory | every carrier ever admitted, about 1 KB of memory and 400 bytes of journal an envelope (a receipt of 8 acknowledgements about 2 KB) | none: not bounded. 1,000,000 carriers are about 1 to 2 GB of memory | The winner of a funding output is decided over every carrier ever admitted on it, so every one is kept. `bbox_carrier_lines` counts them; size Node's heap for it | Same |
 | BRC-104 sessions the terms route keeps (`BBOX_SESSIONS`, `BBOX_SESSION_TTL`) | 10000, each forgotten after 600 s idle | host policy | A handshake is unauthenticated: the store must not grow without end. Past the cap the least recently used goes (`bbox_sessions_evicted_total{why="cap"}`) and its client shakes hands again | Not on the plane |
 | BRC-104 handshakes the terms route answers (`BBOX_HANDSHAKES_PER_SEC`, `BBOX_HANDSHAKE_BURST`, `BBOX_HANDSHAKES_PER_ADDR_PER_SEC`, `BBOX_HANDSHAKE_ADDR_BURST`) | 4 a second, 8 at once; per remote address (IPv6 per /64) 1 a second, 4 at once | host policy; over it answered 429 with `Retry-After`, before any signature | The session cap bounds memory, not CPU: each handshake is a signature on the host's own process, which signs about 10 a second on a test host. The defaults leave most of it to the host's own work (`bbox_handshakes_total{result}`) | Not on the plane |
+| Signed responses one BRC-104 session is given (`BBOX_RESPONSES_PER_SEC`, `BBOX_RESPONSE_BURST`) | 5 a second, 20 at once | host policy; over it answered 429 with `Retry-After` and no signature | Every authenticated answer is a signature on the host's own process: one handshake must not buy them without end. A reader walking pages asks far fewer (`bbox_requests_total{result}`) | Not on the plane |
+| Authenticated requests remembered, to refuse one sent twice | the last 65536 | fixed | A replay is refused 401 before any signature; the session budget bounds an older one | Not on the plane |
 | Lookup rate a host accepts | host policy | host policy; answers 429 with `Retry-After` | Resolution and lookup are an unauthenticated surface | Same |
 
 ## Where the numbers come from

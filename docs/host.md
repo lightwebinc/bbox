@@ -45,7 +45,7 @@ transaction for the chain (spec section 8.1). The reference host has none.
 | `BBOX_RETENTION_DAYS` | 31 | how long what a host no longer answers is kept, from first sight. At least 31 |
 | `BBOX_MAX_BEEF` | 262144 | the host's BEEF bound, in bytes. At least 262144 |
 | `BBOX_LISTEN` | none | `host:port` of the terms route (below) |
-| `BBOX_PRICES` | none | the classes this host prices, for example `history=5,history-after=5`. Only the priceable classes; a price of 0 charges nothing |
+| `BBOX_PRICES` | none | the classes this host prices, for example `history=5,history-after=5`. Only the priceable classes; a price of 0 charges nothing. A class and its `-after` form are priced together or not at all |
 | `BBOX_PAYEE_KEY` | none | the payee's private key, 64 lowercase hex characters: the terms route's BRC-104 identity and the key payments are derived from |
 | `BBOX_HEADERS_URL` | `OVERLAY_CHAIN_TRACKER_URL` | the header source payments are verified against, in the reference host's `/v1` shape |
 | `BBOX_SESSIONS` | 10000 | the most BRC-104 sessions the terms route keeps. Past it the least recently used is forgotten |
@@ -54,9 +54,14 @@ transaction for the chain (spec section 8.1). The reference host has none.
 | `BBOX_HANDSHAKE_BURST` | 8 | the most handshakes the terms route answers at once |
 | `BBOX_HANDSHAKES_PER_ADDR_PER_SEC` | 1 | handshakes a second one remote address is answered; decimals allowed |
 | `BBOX_HANDSHAKE_ADDR_BURST` | 4 | the most handshakes one remote address is answered at once |
+| `BBOX_RESPONSES_PER_SEC` | 5 | signed responses a second one BRC-104 session is given; decimals allowed |
+| `BBOX_RESPONSE_BURST` | 20 | the most signed responses one session is given at once |
 
-A price needs `BBOX_LISTEN`, `BBOX_PAYEE_KEY` and a header source. Any
-mistake stops the host before its port opens.
+A price needs `BBOX_LISTEN`, `BBOX_PAYEE_KEY` and a header source.
+`history` and `history-after` sell one walk, so a host that prices one and
+not the other (`history=5` alone) is refused: the free form would answer
+every page but the first for nothing. Any mistake stops the host before its
+port opens.
 
 ## The state directory
 
@@ -68,8 +73,23 @@ mistake stops the host before its port opens.
   line is flushed to disk before the admission it records completes.
 - `payments.jsonl` holds every payment the terms route accepted: the Atomic
   BEEF, the derivation prefix and suffix, the sender's identity key, the
-  satoshis and the class. The route answers once the line is on disk. It
-  does not broadcast the payment: see [Settling payments](#settling-payments).
+  satoshis, the class and the outpoints it spends. The route answers once
+  the line is on disk. It does not broadcast the payment: see
+  [Settling payments](#settling-payments).
+
+The module holds every carrier line of `outpoints.jsonl` in memory for the
+host's life, and nothing bounds it: about 1 KB of memory and 400 bytes of
+journal for each envelope ever admitted, dropped or not (a receipt of 8
+acknowledgements about 2 KB and 900 bytes), so 1,000,000 carriers cost
+about 1 to 2 GB of memory and up to 1 GB of disk (`bbox_carrier_lines`
+counts them). Give Node the heap for the carriers the host expects
+(`--max-old-space-size`), and watch the gauge.
+
+A state directory written by an earlier build loads unchanged, and an
+earlier build loads this one's: the journal's lines are the same three
+kinds. A sweep admitted in a second office is named there by one more line
+of the kind a sweep always had, and a `payments.jsonl` line without its
+outpoints has them read from its transaction.
 
 ### Backing it up
 
@@ -129,8 +149,14 @@ header it is answered 402 with `x-bsv-payment-version` (`1.0`),
 signed by the payee's identity key; with one, it is answered once output 0
 of the payment pays at least the price, P2PKH, to the key BRC-29 derives for
 the prefix, the suffix and the asker, the prefix is one this route issued,
-the payment verifies against the host's headers, and its txid was never used
-before. One payment buys one question. The same class asked on the host's
+the payment verifies against the host's headers, its txid was never used
+before, and it spends no coin an accepted payment spent. A payment is
+unbroadcast when it is offered, so two transactions spending one coin both
+verify and at most one can ever be mined: the second is refused 409
+`ERR_PAYMENT_CONFLICT`, as a used txid is refused 409
+`ERR_PAYMENT_REPLAYED`. The coins of every accepted payment are kept in
+`payments.jsonl` and refused again after a restart. One payment buys one
+question. The same class asked on the host's
 own `/lookup` is refused with an error that names this route.
 
 ### The session bound
@@ -170,8 +196,23 @@ proxy instead. `bbox_handshakes_total{result}` counts every handshake:
 `accepted`, `failed` (malformed or not verified), `limited_address`,
 `limited_global`.
 
-Requests inside a session are not budgeted: each signed answer is a
-signature too, but only for a client that already shook hands.
+### The response budget
+
+Every authenticated request is answered with a signature, so one handshake
+must not buy signatures without end. Each session has a token bucket,
+`BBOX_RESPONSES_PER_SEC` a second up to `BBOX_RESPONSE_BURST` at once,
+taken only by a request that verified, so nobody spends another session's.
+A request over it is answered 429 with `Retry-After` and
+`ERR_RATE_LIMITED`, and nothing is signed. A BRC-104 client reports an
+unsigned answer as a failed authentication: `bbox history` waits as the
+header says (1 to 30 seconds) and asks once more. The defaults, 5 a second
+and 20 at once, are far above what a reader walking pages asks.
+
+An authenticated request sent again byte for byte is refused 401
+`ERR_AUTH_REPLAYED` before any signature work. The route remembers the
+last 65536 requests it verified; the session's budget bounds what an older
+replay can cost. `bbox_requests_total{result}` counts both refusals:
+`replayed`, `limited`.
 
 ## Settling payments
 
@@ -251,14 +292,23 @@ once its winner is acknowledged), and the rest are dropped at once. To drop
 is to take a carrier out of every answer, mark its outpoint row, and delete
 its output from the host's storage; the engine's record that the
 transaction was applied stays, so a dropped carrier offered again is a
-duplicate. Retention runs every hour.
+duplicate. Retention runs every hour. The output is deleted at once: after
+the admission that dropped it, and after each retention run. A storage
+with no `deleteOutput` keeps what was dropped; the module says so in the
+log once and keeps no list of it.
 
 On start the host hands the module the unspent outputs of its topics and
 its storage. The module reloads the outpoint rows, indexes every output,
 and reads from storage every carrier and sweep the rows name that the
 unspent rows did not carry (a sweep's tombstone that something spent).
 Statuses are functions of that set, so the order storage returns rows in
-changes nothing.
+changes nothing. An admission that arrives while the index is being rebuilt
+waits for the rebuild, and is then decided as any other.
+
+One mined sweep may be published in several offices. It is indexed in each
+office that admitted it and named there in the outpoint rows, so each
+office answers it, a restart reads it back in each, and dropping it from
+one topic leaves it answering in the others.
 
 ## Metrics
 
@@ -270,11 +320,13 @@ changes nothing.
 | `bbox_dropped_total` | `why` | carriers and sweeps dropped: `evidence`, `retention` |
 | `bbox_retractions_total` | | outpoints recorded as swept, the fee input of each sweep included (a sweep of one funding output counts 2) |
 | `bbox_lookups_total` | `class` | questions answered |
-| `bbox_payments_total` | `result` | `requested` (a 402), `accepted`, `refused`, `replayed` |
+| `bbox_payments_total` | `result` | `requested` (a 402), `accepted`, `refused`, `replayed` (a txid used before, or a coin an accepted payment spent) |
+| `bbox_requests_total` | `result` | authenticated requests refused before any signature: `replayed`, `limited` (over the session's budget, answered 429) |
 | `bbox_sessions` | | BRC-104 sessions the terms route keeps |
 | `bbox_sessions_evicted_total` | `why` | sessions forgotten: `cap`, `idle` |
 | `bbox_handshakes_total` | `result` | BRC-104 handshakes at the terms route: `accepted`, `failed`, `limited_address`, `limited_global` (over the budget, answered 429) |
 | `bbox_offices`, `bbox_envelopes`, `bbox_receipts`, `bbox_sweeps`, `bbox_outpoint_rows` | | gauges of what the index holds |
+| `bbox_carrier_lines` | | carriers ever admitted, each a journal line held in memory for the host's life |
 
 Counters and gauges count different things. A `_total` counter counts
 events since this process started and starts again at 0 on a restart; a
