@@ -322,12 +322,12 @@ func (e *Engine) Resume(ctx context.Context) error {
 }
 
 // Close collects a tree still being minted ahead, so its change reaches the
-// pool, and records one never adopted in the state's Ahead list, so a sweep
-// finds it.
+// pool, and records every tree the library holds and never adopted in the
+// state's Ahead list, so a sweep finds it.
 func (e *Engine) Close(ctx context.Context) error {
 	_ = e.trees.Wait(ctx)
-	if p := e.trees.Prepared(); p != nil {
-		e.St.Ahead = producer.Index(e.St.Ahead, p)
+	for _, p := range e.trees.Held() {
+		e.St.Ahead = producer.Index(e.St.Ahead, &p)
 	}
 	// The run ended: nothing is being taken.
 	Unjournal(e.St)
@@ -351,6 +351,10 @@ func (e *Engine) spend(ctx context.Context) (*transaction.Transaction, uint32, e
 		e.trees.Ahead = e.Opts.Ahead
 	}
 	tree, vout, err := e.trees.Spend(ctx, 1)
+	if e.unpublished(err) {
+		// The tree is adopted and is the current one, which Spend answers.
+		tree, vout, err = e.trees.Spend(ctx, 1)
+	}
 	if err != nil {
 		return nil, 0, FeeError(fmt.Errorf("funding tree: %w", err))
 	}
@@ -388,14 +392,16 @@ func (e *Engine) promoteAhead() error {
 	if st.Tree != nil && st.Tree.Remaining() > 0 {
 		return nil
 	}
-	var held *funding.Tree
+	var held []funding.Tree
 	if e.trees != nil {
-		held = e.trees.Prepared()
+		held = e.trees.Held()
 	}
 	for _, t := range st.Ahead {
 		// A tree the library holds, minted ahead or recovered in this run,
-		// is switched to by the library, which then lets go of it.
-		if held != nil && held.Txid == t.Txid {
+		// is switched to by the library, which then lets go of it. It holds
+		// any number, and each is left to it: one adopted here would be
+		// adopted again, from its first output, when the library reached it.
+		if slices.ContainsFunc(held, func(h funding.Tree) bool { return h.Txid == t.Txid }) {
 			continue
 		}
 		if t.IdentityKeyHex == e.Signer.IdentityHex() && t.Remaining() > 0 {

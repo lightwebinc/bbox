@@ -257,7 +257,7 @@ func TestATreeThatLandsAfterItsCoinWentBack(t *testing.T) {
 		t.Fatalf("the tree that landed late: %+v\n%s", st, errs)
 	}
 	pool := h.poolCoins("stopped")
-	if pool[coin] || !strings.Contains(errs, "coin "+coin+" is spent on the chain and is taken out of the pool") {
+	if pool[coin] || !strings.Contains(errs, "its fee coin "+coin+" is spent and is taken out of the pool") {
 		t.Fatalf("the spent coin is still in the pool (%v):\n%s", pool[coin], errs)
 	}
 	change := false

@@ -118,28 +118,3 @@ func TestARecordThatCannotBeSavedAbortsTheMint(t *testing.T) {
 		t.Fatalf("a record that could not be saved: %v %+v", err, st.PendingTrees)
 	}
 }
-
-// A spent coin is taken out of the pool, and every other coin stays.
-func TestRemoveCoin(t *testing.T) {
-	w, err := bwallet.Create(t.TempDir(), Profile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := bwallet.Output{TxID: strings.Repeat("11", 32), Vout: 0, Satoshis: 5, Height: 3}
-	b := bwallet.Output{TxID: strings.Repeat("11", 32), Vout: 1, Satoshis: 5, Unproven: true}
-	c := bwallet.Output{TxID: strings.Repeat("22", 32), Vout: 0, Satoshis: 5, Height: 9, Coinbase: true}
-	d := bwallet.Output{TxID: strings.Repeat("33", 32), Vout: 0, Satoshis: 5, Unproven: true}
-	if _, err := w.Pool.Add(a, b, c, d); err != nil {
-		t.Fatal(err)
-	}
-	for _, gone := range []bwallet.Output{b, a} {
-		if !RemoveCoin(w.Pool, gone) || RemoveCoin(w.Pool, gone) {
-			t.Fatalf("removing %s", gone.Outpoint())
-		}
-	}
-	left := w.Pool.Outputs()
-	if len(left) != 2 || left[0].Outpoint() != d.Outpoint() && left[1].Outpoint() != d.Outpoint() ||
-		left[0].Outpoint() != c.Outpoint() && left[1].Outpoint() != c.Outpoint() {
-		t.Fatalf("the pool after: %+v", left)
-	}
-}

@@ -194,14 +194,16 @@ became of the tree before it spends anything, and says what it found:
 | The node shows | The command does | It says |
 | --- | --- | --- |
 | the tree, and the current tree is used up or there is none | adopts the tree and takes its unspent change into the pool | `funding tree ... is recovered` |
-| the tree, and the current tree still has outputs | holds the tree as the one minted ahead, takes its change, and adopts it when the current tree runs out; the record stays until then | `funding tree ... is recovered and waits for the switch` |
+| the tree, and the current tree still has outputs | holds the tree, behind any tree already held, takes its change, and adopts it when the trees before it run out; the record stays until then | `funding tree ... is recovered and waits for the switch` |
 | no such tree, and the coin unspent | puts the coin back in the pool and keeps the record for one more command; the second such answer drops it | `... never reached the chain: its fee coin ... is unspent and back in the pool`, then `its record is kept for one more command` |
 | no such tree, and the coin spent by another transaction | drops the record | `... never reached the chain: its fee coin ... is spent by ...` |
 | nothing: it cannot be asked, or cannot say | keeps the record and goes on; the next command asks again | `... could not be settled now (...): its record is kept and the next command asks again` |
 
 A tree that reaches the node after its coin went back is found by the next
 command, which adopts it and takes the coin, now spent, out of the pool
-(`coin ... is spent on the chain and is taken out of the pool`). A command
+(`... its fee coin ... is spent and is taken out of the pool`). Several
+trees found on the chain while the current tree has outputs are all held,
+and are spent one after the other, in the order of their records. A command
 that only reads (`list`, `history`, `doctor`, and `read` when it
 acknowledges nothing) asks nothing about a tree and needs no node for it.
 What is left open is in [limits.md](limits.md).

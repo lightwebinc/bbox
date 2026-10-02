@@ -2,7 +2,7 @@ package send
 
 import (
 	"context"
-	"math"
+	"errors"
 	"slices"
 
 	"github.com/lightwebinc/bcommon/bwallet"
@@ -36,9 +36,10 @@ func (e *Engine) prepareTree(tree funding.Tree, coin bwallet.Output) error {
 // RecoverTrees settles every tree a run signed for a coin and did not
 // adopt, before anything is spent:
 //
-//   - a tree the chain holds is adopted, or held as the tree minted ahead
-//     while the current tree has outputs left, and its change is taken. A
-//     held tree is recorded among the trees minted ahead, and its record
+//   - a tree the chain holds is adopted, or held while the current tree
+//     has outputs left, and its change is taken. Any number are held, in
+//     the order of their records, and the switch takes them in that order.
+//     A held tree is recorded among the trees minted ahead, and its record
 //     stays until the switch adopts it;
 //   - a tree the node does not know whose coin another transaction spent is
 //     gone, and its record is dropped;
@@ -50,9 +51,9 @@ func (e *Engine) prepareTree(tree funding.Tree, coin bwallet.Output) error {
 //   - a node that cannot answer decides nothing: the record stays, the next
 //     command asks again, and this one goes on.
 //
-// A coin the pool holds although a tree on the chain spends it (it was put
-// back before the tree landed) is taken out of the pool. Only a failure to
-// save the state is returned.
+// A coin the pool holds although the chain shows it spent (it was put back
+// before the tree landed) is taken out of the pool by the library, which
+// says so. Only a failure to save the state is returned.
 func (e *Engine) RecoverTrees(ctx context.Context) error {
 	for _, p := range slices.Clone(e.St.PendingTrees) {
 		id := p.Tree.Txid
@@ -72,6 +73,10 @@ func (e *Engine) RecoverTrees(ctx context.Context) error {
 			continue
 		}
 		r, err := e.trees.Recover(ctx, p.Tree, p.Coin)
+		if e.unpublished(err) {
+			// The outcome is TreeAdopted, and it stands.
+			err = nil
+		}
 		if err != nil {
 			e.note("funding tree %s was signed by a run that stopped before recording it, and what became of it could not be settled now (%v): its record is kept and the next command asks again", id, err)
 			if ctx.Err() != nil {
@@ -82,13 +87,10 @@ func (e *Engine) RecoverTrees(ctx context.Context) error {
 		switch r.Outcome {
 		case producer.TreeAdopted:
 			e.St.DropPendingTree(id)
-			e.unpool(p.Coin)
 		case producer.TreeHeld:
 			e.St.Ahead = producer.Index(e.St.Ahead, &r.Tree)
-			e.unpool(p.Coin)
 		case producer.CoinSpent:
 			e.St.DropPendingTree(id)
-			e.unpool(p.Coin)
 		case producer.CoinReturned:
 			if p.ReturnedOnce {
 				e.St.DropPendingTree(id)
@@ -112,36 +114,21 @@ func (e *Engine) adopted(txid string) bool {
 		slices.ContainsFunc(st.Trees, func(t funding.Tree) bool { return t.Txid == txid })
 }
 
-// unpool takes coin out of the pool when the pool holds it: the chain
-// shows it spent. The pool has no removal, so coins are taken until this
-// one comes out, and the others are put back.
-func (e *Engine) unpool(coin bwallet.Output) {
-	if RemoveCoin(e.Pool, coin) {
-		e.note("coin %s is spent on the chain and is taken out of the pool", coin.Outpoint())
-	}
-}
-
-// RemoveCoin takes coin out of pool, and reports whether the pool held it.
-func RemoveCoin(pool *bwallet.Pool, coin bwallet.Output) bool {
-	op := coin.Outpoint()
-	if !slices.ContainsFunc(pool.Outputs(), func(o bwallet.Output) bool { return o.Outpoint() == op }) {
+// unpublished reports whether err is the library's word that it adopted a
+// funding tree and could not publish it (producer.ErrPublish). The tree is
+// then the current one and its record is dropped, so nothing is left to
+// recover, and the library leaves the publish to be repeated
+// (producer.Trees.Publish). Here there is none to repeat and none to keep
+// for a later command: a bbox funding tree is published to no host. The
+// facade the library publishes a tree on sends nothing (unicast.Kept), and
+// every carrier carries its own tree. So the tree is used as it is, and the
+// caller goes on as it does after a publish that succeeded.
+func (e *Engine) unpublished(err error) bool {
+	if !errors.Is(err, producer.ErrPublish) {
 		return false
 	}
-	var keep []bwallet.Output
-	removed := false
-	for {
-		o, err := pool.TakeAtLeast(math.MaxUint32, 1, []string{coin.TxID})
-		if err != nil {
-			break
-		}
-		if o.Outpoint() == op {
-			removed = true
-			break
-		}
-		keep = append(keep, o)
+	if e.Verbose {
+		e.note("a funding tree is adopted, and the library's publish of it, which sends nothing, failed (%v): nothing is left to do for it", err)
 	}
-	for _, o := range keep {
-		_ = pool.Return(o)
-	}
-	return removed
+	return true
 }
