@@ -77,6 +77,11 @@ const (
 // then the host is reported missed and the object stays persisted.
 var Retries = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 
+// PlaneWait are the waits between a publisher's lookups for an object it
+// submitted to the plane, at each host it names, before it offers the
+// object to that host directly: the plane delivers in well under a second.
+var PlaneWait = []time.Duration{500 * time.Millisecond, time.Second, 2 * time.Second}
+
 // Reading.
 const (
 	// PageSize is the most envelopes one answer page holds (the spec's).
@@ -87,6 +92,12 @@ const (
 	// -max-sats: a price is per question, and a host that asks more than
 	// this is asked by the user, not paid by default.
 	DefaultMaxPrice = 1000
+	// DefaultBudget is the most a command that asks several priced
+	// questions pays in all without -budget.
+	DefaultBudget = 16 * DefaultMaxPrice
+	// MaxAnswer is the most bytes a reader takes for one lookup answer: a
+	// full page of the largest envelopes fits several times over.
+	MaxAnswer = 16 << 20
 )
 
 // Settling. DefaultSettleInFlight and MaxSettleInFlight bound the payments

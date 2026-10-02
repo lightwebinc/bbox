@@ -57,6 +57,16 @@ type Client struct {
 	HTTP    *http.Client
 	// MaxPages bounds the pages one question reads per host.
 	MaxPages int
+	// Source, when set, is a chain source asked for a transaction's
+	// current proof when the proof a host stored no longer verifies
+	// against Headers. Without one, such an answer is refused.
+	Source ChainSource
+}
+
+// ChainSource is a source of a mined transaction's current proof, by its
+// txid: a node's asset API (nodeapi.Asset is one).
+type ChainSource interface {
+	MerkleProof(ctx context.Context, txid string) (*transaction.MerklePath, error)
 }
 
 // Query is one ls_bbox question: its members, every one a string.
@@ -65,9 +75,10 @@ type Query map[string]string
 // ErrHost is a host that answered with an error: its words travel with it.
 var ErrHost = errors.New("reader: the host refused the question")
 
-// Ask asks one host one question and returns the outputs it answered.
+// Ask asks one host one question and returns the outputs it answered. An
+// answer over limits.MaxAnswer bytes is an error, not read.
 func (c *Client) Ask(ctx context.Context, host string, q Query) ([]lookup.Output, error) {
-	hs := &hostset.Client{Timeout: c.Timeout, HTTP: c.HTTP}
+	hs := &hostset.Client{Timeout: c.Timeout, HTTP: c.HTTP, MaxBody: limits.MaxAnswer}
 	res, err := lookup.Query(ctx, hs, host, lookup.Question{Service: boxrec.LookupService, Query: q})
 	if err != nil {
 		if strings.Contains(err.Error(), "answered status 4") {
@@ -147,6 +158,75 @@ func Verify(ctx context.Context, beef []byte, office string, want boxrec.TxKind,
 	return &Item{Txid: txid.String(), Beef: beef, Tx: tx, Admission: a}, nil
 }
 
+// A host stores a carrier with the proof of its funding tree it was given,
+// and cannot take a new one: after a reorganisation the stored proof may
+// name a block that is no longer in the best chain, although the same
+// funding tree was mined again elsewhere (spec section 8.2). A reader then
+// fetches the tree's current proof from a chain source by its txid, and
+// verifies that against its own headers.
+
+// current is the chain source's proof of tx, when the proof tx carries
+// does not verify against the reader's headers and the source's does.
+func (c *Client) current(ctx context.Context, tx *transaction.Transaction) bool {
+	if c.Source == nil || tx == nil || c.Headers == nil {
+		return false
+	}
+	if tx.MerklePath != nil {
+		if ok, err := tx.MerklePath.Verify(ctx, tx.TxID(), c.Headers); err != nil || ok {
+			return false
+		}
+	}
+	mp, err := c.Source.MerkleProof(ctx, tx.TxID().String())
+	if err != nil || mp == nil {
+		return false
+	}
+	if mp, err = boxrec.MinimalPath(mp, tx.TxID()); err != nil {
+		return false
+	}
+	if ok, err := mp.Verify(ctx, tx.TxID(), c.Headers); err != nil || !ok {
+		return false
+	}
+	tx.MerklePath = mp
+	return true
+}
+
+// Verify is the package's Verify against the client's headers, with a
+// stale proof of the carrier's funding tree, or of a sweep, replaced by the
+// chain source's current one.
+func (c *Client) Verify(ctx context.Context, beef []byte, office string, want boxrec.TxKind, to []byte) (*Item, error) {
+	it, err := Verify(ctx, beef, office, want, to, c.Headers)
+	if err == nil || c.Source == nil {
+		return it, err
+	}
+	_, tx, _, perr := guard.ParseBEEF(beef, MaxBEEF)
+	if perr != nil || tx == nil {
+		return nil, err
+	}
+	target := tx
+	if want != boxrec.TxSweep {
+		if len(tx.Inputs) != 1 {
+			return nil, err
+		}
+		target = tx.Inputs[0].SourceTransaction
+	}
+	if !c.current(ctx, target) {
+		return nil, err
+	}
+	again, perr := tx.AtomicBEEF(false)
+	if perr != nil {
+		return nil, err
+	}
+	return Verify(ctx, again, office, want, to, c.Headers)
+}
+
+// pageOutputs is the most outputs taken from one page (a page of this
+// contract is at most limits.PageSize), and walkBytes the most bytes one
+// paged walk holds from one host.
+const (
+	pageOutputs = 2 * limits.PageSize
+	walkBytes   = 256 << 20
+)
+
 // HostAnswer is what one host answered to one question, all pages.
 type HostAnswer struct {
 	Host    string
@@ -165,7 +245,10 @@ func cursor(it *Item) string {
 
 // Pages asks one host an envelope class, page after page, until a page is
 // short. office is the question's office; to, when set, the recipient every
-// envelope must be to.
+// envelope must be to. What one page and one walk hold is bounded here,
+// whatever a host answers: a page over the contract's is cut, a walk over
+// walkBytes stops, and a host whose full page does not move past the
+// cursor it was asked after ends the walk. Each is reported as Truncated.
 func (c *Client) Pages(ctx context.Context, host string, q Query, to []byte) HostAnswer {
 	ha := HostAnswer{Host: host}
 	maxPages := c.MaxPages
@@ -176,6 +259,7 @@ func (c *Client) Pages(ctx context.Context, host string, q Query, to []byte) Hos
 	for k, v := range q {
 		page[k] = v
 	}
+	held := 0
 	for n := 0; ; n++ {
 		if n == maxPages {
 			ha.Truncated = true
@@ -186,9 +270,20 @@ func (c *Client) Pages(ctx context.Context, host string, q Query, to []byte) Hos
 			ha.Err = err
 			return ha
 		}
+		full := len(outs) >= limits.PageSize
+		if len(outs) > pageOutputs {
+			outs, ha.Truncated = outs[:pageOutputs], true
+		}
+		for _, o := range outs {
+			held += len(o.Beef) + len(o.Context)
+		}
+		if held > walkBytes {
+			ha.Truncated = true
+			return ha
+		}
 		var last *Item
 		for _, o := range outs {
-			it, err := Verify(ctx, o.Beef, q["office"], boxrec.TxEnvelope, to, c.Headers)
+			it, err := c.Verify(ctx, o.Beef, q["office"], boxrec.TxEnvelope, to)
 			if err != nil {
 				ha.Refused = append(ha.Refused, Refusal{Host: host, Txid: subjectID(o.Beef), Reason: boxrec.Reason(err), Err: err})
 				continue
@@ -198,11 +293,31 @@ func (c *Client) Pages(ctx context.Context, host string, q Query, to []byte) Hos
 				last = it
 			}
 		}
-		if len(outs) < limits.PageSize || last == nil {
+		if ha.Truncated || !full || last == nil {
 			return ha
 		}
-		page["after"] = cursor(last)
+		next := cursor(last)
+		if prev, ok := page["after"]; ok && !afterCursor(next, prev) {
+			// A full page that does not move past the cursor it was asked
+			// after: the host is repeating itself.
+			ha.Truncated = true
+			return ha
+		}
+		page["after"] = next
 	}
+}
+
+// afterCursor reports whether cursor a sorts strictly after cursor b.
+func afterCursor(a, b string) bool {
+	ac, at, aok := boxrec.ParseAfter(a)
+	bc, bt, bok := boxrec.ParseAfter(b)
+	if !aok || !bok {
+		return a != b
+	}
+	if ac != bc {
+		return ac > bc
+	}
+	return at > bt
 }
 
 func less(a, b *Item) bool {
@@ -343,7 +458,7 @@ func (c *Client) Acknowledged(ctx context.Context, host, office string, to []byt
 		return false, err
 	}
 	for _, o := range outs {
-		it, err := Verify(ctx, o.Beef, office, boxrec.TxReceipt, nil, c.Headers)
+		it, err := c.Verify(ctx, o.Beef, office, boxrec.TxReceipt, nil)
 		if err != nil || it.Admission.Carrier == nil || it.Admission.Carrier.Receipt == nil {
 			continue
 		}
