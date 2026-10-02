@@ -86,8 +86,9 @@ global flags:
                       unicast (submit to each of hosts)
   -network NET        main, test or regtest (default main)
   -office OFFICE      the office identifier <name>_<suffix>
-  -quorum Q           mode unicast: hosts that must take an object for it to
-                      count as published: all (default), majority, one or N
+  -quorum Q           hosts that must hold an envelope or a receipt for it
+                      to count as published: all (default), majority, one
+                      or N; a sweep always needs every host
   -timeout DUR        per request (default 15s)
   -v                  verbose
   -version            print the version and exit
@@ -139,7 +140,12 @@ type global struct {
 	getenv  func(string) string
 }
 
-func (g *global) say(format string, args ...any) { fmt.Fprintf(g.stderr, format+"\n", args...) }
+// say writes a note to standard error. A note may quote what a host, a
+// node or a record said, which is someone else's text: every note is
+// filtered for the terminal.
+func (g *global) say(format string, args ...any) {
+	fmt.Fprintln(g.stderr, plain(fmt.Sprintf(format, args...)))
+}
 
 type command func(ctx context.Context, g *global, args []string) error
 
@@ -245,11 +251,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return exitOK
 	case errors.As(err, &ee):
 		if ee.msg != "" {
-			fmt.Fprintln(stderr, "bbox:", ee.msg)
+			fmt.Fprintln(stderr, "bbox:", plain(ee.msg))
 		}
 		return ee.code
 	default:
-		fmt.Fprintln(stderr, "bbox:", err)
+		fmt.Fprintln(stderr, "bbox:", plain(err.Error()))
 		return exitUsage
 	}
 }

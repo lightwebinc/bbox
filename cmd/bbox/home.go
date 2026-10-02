@@ -66,13 +66,30 @@ type home struct {
 	close func()
 }
 
-// openHome opens and locks the home and loads its state.
-func (g *global) openHome() (*home, error) {
-	e, err := g.openWallet()
-	if err != nil {
-		return nil, err
+// lockedWallet takes the home's lock and only then opens its wallet. The
+// order matters: the wallet's coin pool is read into memory when it is
+// opened and written back whole when it changes, so a pool read before the
+// lock is one another command may change in between, and saving it would
+// put back coins that command spent.
+func (g *global) lockedWallet() (*bwallet.Embedded, func(), error) {
+	if _, err := os.Stat(filepath.Join(g.cfg.Home, "identity.json")); err != nil {
+		return nil, nil, fmt.Errorf("open the home %s: %w (run `bbox init`)", g.cfg.Home, err)
 	}
 	unlock, err := g.lockHome()
+	if err != nil {
+		return nil, nil, err
+	}
+	e, err := g.openWallet()
+	if err != nil {
+		unlock()
+		return nil, nil, err
+	}
+	return e, unlock, nil
+}
+
+// openHome locks the home, opens its wallet and loads its state.
+func (g *global) openHome() (*home, error) {
+	e, unlock, err := g.lockedWallet()
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +140,13 @@ func (g *global) reader() (*reader.Client, error) {
 	if len(g.cfg.Hosts) == 0 {
 		return nil, usage("no overlay host configured (config key hosts, or -hosts)")
 	}
-	return &reader.Client{Hosts: g.cfg.Hosts, Headers: hc, Timeout: g.cfg.Timeout, HTTP: httpClient}, nil
+	rd := &reader.Client{Hosts: g.cfg.Hosts, Headers: hc, Timeout: g.cfg.Timeout, HTTP: httpClient}
+	if g.cfg.Asset != "" {
+		// A proof a host stored that a reorganisation left stale is
+		// replaced by the node's current one (spec section 8.2).
+		rd.Source = &nodeapi.Asset{Base: g.cfg.Asset}
+	}
+	return rd, nil
 }
 
 // office is the office a command uses: its -office flag, else the
@@ -156,11 +179,17 @@ func (g *global) legs() (send.Legs, error) {
 	}
 	// A unicast publisher confirms by lookup a host that admitted nothing
 	// (spec section 9), so it needs the hosts and the headers; on the plane
-	// the reader only confirms the hosts a sweep is sent to directly.
+	// the reader confirms that the hosts named hold what the facade took,
+	// when hosts and a header source are configured.
 	if rd, err := g.reader(); err == nil {
 		l.Reader = rd
+		l.Headers = rd.Headers
 	} else if g.cfg.Mode == config.ModeUnicast {
 		return l, err
+	} else if g.cfg.HeaderURL != "" {
+		if l.Headers, err = g.headerClient(); err != nil {
+			return l, err
+		}
 	}
 	switch g.cfg.Mode {
 	case config.ModeUnicast:
@@ -190,14 +219,30 @@ func (g *global) legs() (send.Legs, error) {
 	return l, nil
 }
 
-// engine opens a publisher over an open home.
+// engine opens a publisher over an open home, and finishes whatever a
+// previous run left.
 func (g *global) engine(ctx context.Context, h *home, treeCount int) (*send.Engine, error) {
+	return g.engineFor(ctx, h, treeCount, false)
+}
+
+// engineFor is engine; with lenient set, work a previous run left that
+// cannot be finished now is reported and left for the next command, and
+// the publisher is returned all the same. drop runs so: an envelope that
+// cannot reach a host must not keep a retraction from the chain.
+func (g *global) engineFor(ctx context.Context, h *home, treeCount int, lenient bool) (*send.Engine, error) {
 	legs, err := g.legs()
 	if err != nil {
 		return nil, err
 	}
+	need, err := config.Need(g.cfg.Quorum, len(g.cfg.Hosts))
+	if err != nil {
+		if g.cfg.Mode == config.ModeUnicast || len(g.cfg.Hosts) > 0 {
+			return nil, usage("%v (config key quorum)", err)
+		}
+		need = 0
+	}
 	o := send.Options{TreeCount: treeCount, TreeSats: limits.DefaultTreeSats, Ahead: limits.DefaultAhead,
-		Fees: mint.DefaultFees, ObjectBound: g.cfg.ObjectBound, Poll: poll, Wait: 10 * time.Minute}
+		Fees: mint.DefaultFees, ObjectBound: g.cfg.ObjectBound, Poll: poll, Wait: 10 * time.Minute, PlaneNeed: need}
 	if uint32(treeCount) <= o.Ahead { //nolint:gosec // bounded by the limits
 		o.Ahead = uint32(treeCount / 2) //nolint:gosec // bounded by the limits
 	}
@@ -208,7 +253,11 @@ func (g *global) engine(ctx context.Context, h *home, treeCount int) (*send.Engi
 	}
 	eng.Note, eng.Verbose = g.say, g.verbose
 	if err := eng.Start(ctx); err != nil {
-		return nil, err
+		if !lenient || ctx.Err() != nil {
+			_ = eng.Close(context.WithoutCancel(ctx))
+			return nil, err
+		}
+		g.say("work an earlier command left is not finished, and is left for the next command: %v", err)
 	}
 	return eng, nil
 }
@@ -242,6 +291,16 @@ func cmdInit(_ context.Context, g *global, args []string) error {
 	} else if len(pos) > 0 {
 		return usage("init takes no arguments")
 	}
+	// The lock is taken before the wallet is made or opened: a home that
+	// exists may be in use.
+	if err := os.MkdirAll(g.cfg.Home, 0o700); err != nil {
+		return err
+	}
+	unlock, err := g.lockHome()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	e, err := bwallet.Create(g.cfg.Home, send.Profile)
 	if errors.Is(err, bwallet.ErrIdentityExists) {
 		if e, err = g.openWallet(); err != nil {
@@ -336,10 +395,11 @@ func cmdFund(ctx context.Context, g *global, args []string) error {
 	if g.cfg.Network == "main" {
 		return usage("fund without -txid mines coinbase, which only a chain you run does; on network main, import a payment with fund -txid")
 	}
-	e, err := g.openWallet()
+	e, unlock, err := g.lockedWallet()
 	if err != nil {
 		return err
 	}
+	defer unlock()
 	addr, err := e.FundAddress(e.Mainnet)
 	if err != nil {
 		return err
@@ -351,11 +411,6 @@ func cmdFund(ctx context.Context, g *global, args []string) error {
 	if err != nil {
 		return err
 	}
-	unlock, err := g.lockHome()
-	if err != nil {
-		return err
-	}
-	defer unlock()
 	tip, err := asset.BestHeader(ctx)
 	if err != nil {
 		return fmt.Errorf("node tip: %w", err)
@@ -389,10 +444,11 @@ func (g *global) importPayment(ctx context.Context, txid string) error {
 	if h, err := chainhash.NewHashFromHex(txid); err != nil || h.String() != txid {
 		return usage("-txid %q is not a transaction id (64 lowercase hex characters)", termsafe.Abbrev(txid))
 	}
-	e, err := g.openWallet()
+	e, unlock, err := g.lockedWallet()
 	if err != nil {
 		return err
 	}
+	defer unlock()
 	hc, err := g.headerClient()
 	if err != nil {
 		return err
@@ -440,11 +496,6 @@ func (g *global) importPayment(ctx context.Context, txid string) error {
 	if len(outs) == 0 {
 		return usage("payment %s pays nothing to the fund address %s", txid, addr)
 	}
-	unlock, err := g.lockHome()
-	if err != nil {
-		return err
-	}
-	defer unlock()
 	added, err := e.Pool.Add(outs...)
 	if err != nil {
 		return err
@@ -484,8 +535,8 @@ func cmdOffice(_ context.Context, g *global, args []string) error {
 			return err
 		}
 		topic, _ := boxrec.Topic(office)
-		if e, err := g.openWallet(); err == nil {
-			unlock, err := g.lockHome()
+		if _, serr := os.Stat(filepath.Join(g.cfg.Home, "identity.json")); serr == nil {
+			e, unlock, err := g.lockedWallet()
 			if err != nil {
 				return err
 			}
@@ -659,4 +710,45 @@ func firstLine(s string) string {
 		s = s[:160] + "..."
 	}
 	return s
+}
+
+// field is someone else's text that fills one field of a line this command
+// prints (a reference's locator, a class name, a refusal's words): filtered
+// for the terminal, and held to that line. Such text is any UTF-8, and one
+// with a line break in it would otherwise write lines of its own in a
+// report, in this command's voice.
+func field(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t', '\v', '\f', 0x85, 0x2028, 0x2029:
+			return ' '
+		}
+		return r
+	}, s)
+	return termsafe.Text(s)
+}
+
+// plain is a note or an error filtered for the terminal, whole. termsafe
+// bounds a line at 512 columns, and a line that quotes a refusal with two
+// transaction ids and a host's words is longer: it would lose its end,
+// which is where it says what to do. So each line is filtered in pieces of
+// 256 runes: a piece holds nothing a terminal acts on once filtered, and
+// joining pieces adds nothing, so the whole is as safe as its parts. At
+// most 200 lines are printed.
+func plain(s string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > termsafe.MaxLines {
+		lines = append(lines[:termsafe.MaxLines], "[truncated]")
+	}
+	for i, l := range lines {
+		r := []rune(l)
+		var b strings.Builder
+		for len(r) > 0 {
+			n := min(len(r), 256)
+			b.WriteString(termsafe.Text(string(r[:n])))
+			r = r[n:]
+		}
+		lines[i] = b.String()
+	}
+	return strings.Join(lines, "\n")
 }

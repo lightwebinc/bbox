@@ -139,8 +139,10 @@ func TestHistoryPaysThe402(t *testing.T) {
 
 // A host gives each session a budget of signed responses and refuses a
 // request over it 429 without a signature. The command waits as the host
-// says and asks once more; what it made for the refused request is
-// refunded, so one answer is one payment; refused twice, it says so.
+// says and asks once more, while it has paid nothing; refused twice, it
+// says so. A refusal of the request that carried the payment is not asked
+// again: that would take a second payment, and the first left this process,
+// so it is kept as made and its coin is not reused.
 func TestHistoryWaitsOutALimitedSession(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -158,24 +160,29 @@ func TestHistoryWaitsOutALimitedSession(t *testing.T) {
 	if !strings.Contains(r.stdout, "paid 7 sat") || !strings.Contains(r.stdout, tx) || !strings.Contains(r.stderr, "waiting 1s and asking once more") || len(h.paid.Payments) != 1 {
 		t.Fatalf("history, the question limited: %d payments\n%s\n%s", len(h.paid.Payments), r.stdout, r.stderr)
 	}
-	// The paid request is refused: its payment was never taken, and the second is the one kept.
+	// The paid request is refused: the payment left this process, so it is
+	// kept as made, broadcast by its payer, and not paid a second time.
+	sent := h.chain.Sent
 	h.paid.Limit(2)
-	r = h.must("bob", "", "history")
-	if !strings.Contains(r.stdout, "paid 7 sat") || !strings.Contains(r.stderr, "waiting 1s and asking once more") || len(h.paid.Payments) != 2 {
-		t.Fatalf("history, the payment limited: %d payments\n%s\n%s", len(h.paid.Payments), r.stdout, r.stderr)
-	}
-	if !strings.Contains(r.stdout, h.paid.Payments[1].Txid) {
-		t.Fatalf("the payment kept is not the one the host took:\n%s", r.stdout)
+	r = h.run("bob", "", "history")
+	h.want(r, exitIncomplete, "refused the paid request for its session's budget (429)")
+	if !strings.Contains(r.stderr, "it is kept as made and its coins are not reused") || strings.Contains(r.stderr, "asking once more") ||
+		len(h.paid.Payments) != 1 || h.chain.Sent != sent+1 {
+		t.Fatalf("history, the payment limited: %d payments at the host, %d sent\n%s\n%s", len(h.paid.Payments), h.chain.Sent-sent, r.stdout, r.stderr)
 	}
 	// Refused twice: the command stops, and nothing was paid.
 	h.paid.Limit(1, 2)
 	h.want(h.run("bob", "", "history"), exitIncomplete, "(429) twice; ask again later")
-	if len(h.paid.Payments) != 2 {
+	if len(h.paid.Payments) != 1 {
 		t.Fatalf("payments %d", len(h.paid.Payments))
 	}
-	// And the wallet still pays: nothing it made for a refused request is stranded.
+	// And the wallet still pays, on a coin the payment it kept did not
+	// spend.
 	h.paid.Limit()
-	h.must("bob", "", "history")
+	r = h.must("bob", "", "history")
+	if !strings.Contains(r.stdout, "paid 7 sat") || len(h.paid.Payments) != 2 {
+		t.Fatalf("history after: %d payments\n%s\n%s", len(h.paid.Payments), r.stdout, r.stderr)
+	}
 }
 
 func TestDropRetractsAtEveryHost(t *testing.T) {
@@ -248,8 +255,11 @@ func TestHostsThatDisagreeAreReported(t *testing.T) {
 	h.identity("alice")
 	bob := h.identity("bob")
 	h.newOffice("bob")
+	// One host of the two takes it: published under a quorum of one.
 	h.b.Drop = func(*transaction.Transaction) bool { return true }
+	h.env["BBOX_QUORUM"] = "one"
 	tx := h.send("alice", bob, "only at a")
+	delete(h.env, "BBOX_QUORUM")
 	h.b.Drop = nil
 	r := h.run("bob", "", "list")
 	h.want(r, exitIncomplete, "host "+h.bS.URL+": DISAGREES")
@@ -447,9 +457,9 @@ func TestDropAgainFinishesTheSweepInFlight(t *testing.T) {
 	}
 }
 
-// A sweep the network refuses is marked failed, its fee coin goes back to
-// the pool, and it no longer blocks the next drop, which builds a new
-// sweep and retracts. Through a node's RPC and through arcade.
+// A sweep an input of which another transaction took is marked failed, and
+// it no longer blocks the drop, which builds a new sweep on another coin
+// and retracts. Through a node's RPC and through arcade.
 func TestRefusedSweepFailsAndFreesTheNextDrop(t *testing.T) {
 	t.Parallel()
 	for _, leg := range []string{"rpc", "arcade"} {
@@ -463,27 +473,22 @@ func TestRefusedSweepFailsAndFreesTheNextDrop(t *testing.T) {
 			bob := h.identity("bob")
 			h.newOffice("bob")
 			gone := h.send("alice", bob, "take back")
-			pool := regexp.MustCompile(`pool        (\d+) output\(s\), (\d+) sat`)
-			before := pool.FindStringSubmatch(h.must("alice", "", "doctor").stdout)
-			h.chain.Refuse = func(*transaction.Transaction) string { return "mandatory-script-verify-flag-failed" }
-			h.want(h.run("alice", "", "drop", gone), exitRefused, "refused by the network")
-			h.chain.Refuse = nil
-			r := h.must("alice", "", "doctor")
-			if !strings.Contains(r.stdout, "FAILED") || strings.Contains(r.stdout, "in flight") {
-				t.Fatalf("doctor after the refusal:\n%s", r.stdout)
-			}
-			if after := pool.FindStringSubmatch(r.stdout); before == nil || after == nil || after[2] != before[2] {
-				t.Fatalf("the fee coin is not back in the pool: before %v, after %v\n%s", before, after, r.stdout)
-			}
-			for _, host := range []*testchain.Host{h.a, h.b} {
-				if host.Status(gone) == "retracted" {
-					t.Fatal("a refused sweep retracted the envelope")
+			tree := h.sentTree("alice", gone)
+			other := strings.Repeat("ab", 32)
+			// As the sweep is sent, another transaction takes its fee coin.
+			h.mu.Lock()
+			h.onSend = func(tx *transaction.Transaction) {
+				for _, in := range tx.Inputs {
+					if in.SourceTXID.String() != tree {
+						h.chain.SpendElsewhere(in.SourceTXID.String(), in.SourceTxOutIndex, other)
+					}
 				}
 			}
-			// A later drop proceeds: a new sweep of the same output.
-			r = h.must("alice", "", "drop", gone)
-			if !strings.Contains(r.stdout, "retracted 1 funding output(s)") {
-				t.Fatalf("drop after the refusal:\n%s\n%s", r.stdout, r.stderr)
+			h.mu.Unlock()
+			r := h.must("alice", "", "drop", gone)
+			if !strings.Contains(r.stderr, "refused by the network") || !strings.Contains(r.stderr, "is spent by "+other) ||
+				!strings.Contains(r.stderr, "was not given back") || !strings.Contains(r.stdout, "retracted 1 funding output(s)") {
+				t.Fatalf("drop:\n%s\n%s", r.stdout, r.stderr)
 			}
 			for _, host := range []*testchain.Host{h.a, h.b} {
 				if host.Status(gone) != "retracted" {
@@ -491,11 +496,36 @@ func TestRefusedSweepFailsAndFreesTheNextDrop(t *testing.T) {
 				}
 			}
 			r = h.must("alice", "", "doctor")
-			if strings.Contains(r.stdout, "in flight") || !strings.Contains(r.stdout, "2 sweep(s)") {
+			if !strings.Contains(r.stdout, "FAILED") || strings.Contains(r.stdout, "in flight") || !strings.Contains(r.stdout, "2 sweep(s)") {
 				t.Fatalf("doctor:\n%s", r.stdout)
 			}
 		})
 	}
+}
+
+// sentTree is the funding tree an envelope a home sent spends.
+func (h *harness) sentTree(name, txid string) string {
+	h.t.Helper()
+	raw, err := os.ReadFile(filepath.Join(h.dir, name, "state.json"))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var st struct {
+		Sent []struct {
+			Txid string `json:"txid"`
+			Tree string `json:"tree"`
+		} `json:"sent"`
+	}
+	if err := json.Unmarshal(raw, &st); err != nil {
+		h.t.Fatal(err)
+	}
+	for _, s := range st.Sent {
+		if s.Txid == txid {
+			return s.Tree
+		}
+	}
+	h.t.Fatalf("%s did not send %s", name, txid)
+	return ""
 }
 
 // A leg that answers nothing (the tcp ingress) cannot say a sweep was
@@ -514,30 +544,38 @@ func TestSweepWithAnInputSpentElsewhereFails(t *testing.T) {
 	bob := h.identity("bob")
 	h.newOffice("bob")
 	gone := h.send("alice", bob, "take back")
-	raw, err := os.ReadFile(filepath.Join(h.dir, "alice", "state.json"))
+	// Every coin of the home is spent by another transaction: whichever
+	// pays a sweep's fee, the sweep cannot mine.
+	raw, err := os.ReadFile(filepath.Join(h.dir, "alice", "wallet.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var st struct {
-		Sent []struct {
+	var pool struct {
+		Outputs []struct {
 			Txid string `json:"txid"`
-			Tree string `json:"tree"`
 			Vout uint32 `json:"vout"`
-		} `json:"sent"`
+		} `json:"outputs"`
 	}
-	if err := json.Unmarshal(raw, &st); err != nil || len(st.Sent) != 1 || st.Sent[0].Txid != gone {
-		t.Fatalf("state: %v %+v", err, st)
+	if err := json.Unmarshal(raw, &pool); err != nil || len(pool.Outputs) == 0 {
+		t.Fatalf("pool: %v %+v", err, pool)
 	}
 	other := strings.Repeat("ab", 32)
-	h.chain.SpendElsewhere(st.Sent[0].Tree, st.Sent[0].Vout, other)
+	for _, o := range pool.Outputs {
+		h.chain.SpendElsewhere(o.Txid, o.Vout, other)
+	}
 	h.env["BBOX_SETTLE"] = "tcp:" + l.Addr().String()
 	h.want(h.run("alice", "", "drop", gone), exitRefused, "is spent by "+other)
-	if n := h.chain.IngressRefused(); n != 1 {
-		t.Fatalf("the ingress refused %d submission(s), want the sweep", n)
+	if n := h.chain.IngressRefused(); n != 3 {
+		t.Fatalf("the ingress refused %d submission(s), want the three sweeps tried", n)
 	}
 	r := h.must("alice", "", "doctor")
 	if !strings.Contains(r.stdout, "FAILED") || strings.Contains(r.stdout, "in flight") {
 		t.Fatalf("doctor:\n%s", r.stdout)
+	}
+	for _, host := range []*testchain.Host{h.a, h.b} {
+		if host.Status(gone) == "retracted" {
+			t.Fatal("a failed sweep retracted the envelope")
+		}
 	}
 }
 

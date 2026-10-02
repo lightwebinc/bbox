@@ -110,6 +110,13 @@ func cmdSend(ctx context.Context, g *global, args []string) error {
 	if g.cfg.Mode == config.ModeUnicast {
 		check.Need, _ = config.Need(g.cfg.Quorum, len(g.cfg.Hosts))
 	}
+	// A reference's locator is printed by whoever reads the message: one
+	// line of plain text, or it is not sent.
+	for _, r := range refs {
+		if loc, _, _ := strings.Cut(r, ","); field(loc) != loc {
+			return usage("-ref: the locator holds a line break or a character a terminal would act on")
+		}
+	}
 	warnings, err := check.Check()
 	if err != nil {
 		return usage("%v", err)
@@ -335,7 +342,13 @@ every conforming host stops answering those envelopes, read or not. -tree
 sweeps every output of a funding tree, used or not, which retracts every
 carrier on it, receipts included, and takes its unused value into the
 tombstone. Retraction reaches honest hosts only: it is not erasure, and a
-copy anyone kept stays a copy.`
+copy anyone kept stays a copy.
+
+Work an earlier command left unfinished (an envelope a host has not taken)
+does not stop a drop: it is reported and left for the next command. An
+output the chain already shows spent is left out of the sweep, and the
+transaction that spends it, once mined, is taken as its sweep and published
+as one: another copy of this home swept it.`
 
 func cmdDrop(ctx context.Context, g *global, args []string) error {
 	fs := g.flagSet("drop", dropHelp)
@@ -402,7 +415,9 @@ func cmdDrop(ctx context.Context, g *global, args []string) error {
 			p.offices = append(p.offices, s.Office)
 		}
 	}
-	eng, err := g.engine(ctx, h, g.cfg.TreeCount)
+	// Work an earlier command left unfinished (an envelope a host has not
+	// taken) does not stop a retraction: it is reported and left.
+	eng, err := g.engineFor(ctx, h, g.cfg.TreeCount, true)
 	if err != nil {
 		return err
 	}
@@ -427,7 +442,18 @@ func cmdDrop(ctx context.Context, g *global, args []string) error {
 		if len(p.offices) == 0 {
 			return usage("no office to publish the sweep of %s to: set office (or -office)", p.tree)
 		}
+		// A sweep refused because another transaction spends one of its
+		// inputs (its fee coin, or an output swept since the node was
+		// asked) is built again without that input.
 		sw, err := eng.Retract(ctx, p.tree, p.vouts, p.offices)
+		for try := 0; try < 2; try++ {
+			var again *send.SweepRefusedError
+			if !errors.As(err, &again) {
+				break
+			}
+			g.say("%v", err)
+			sw, err = eng.Retract(ctx, p.tree, p.vouts, p.offices)
+		}
 		if err != nil {
 			g.tallies(eng)
 			var re *send.SweepRefusedError

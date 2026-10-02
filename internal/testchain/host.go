@@ -51,6 +51,13 @@ type Host struct {
 	// Tamper, when set, rewrites every answered BEEF, as a host that edits
 	// what it serves would.
 	Tamper func(beef []byte) []byte
+	// Stale answers every carrier under a proof of its funding tree that
+	// names another block than the one the chain mined it in: a host whose
+	// stored proofs a reorganisation left behind.
+	Stale bool
+	// HistoryPage, when set, is the most envelopes a history page holds
+	// here, in place of the class's 64.
+	HistoryPage int
 	// Submits counts submissions; Refused counts refusals by reason.
 	Submits int
 	Refused map[string]int
@@ -381,8 +388,12 @@ func (h *Host) Answer(q *boxrec.Question) []Output {
 		}
 		return rows[i].txid < rows[j].txid
 	})
-	if len(rows) > q.Class.Page {
-		rows = rows[:q.Class.Page]
+	page := q.Class.Page
+	if !q.Class.Free && h.HistoryPage > 0 {
+		page = h.HistoryPage
+	}
+	if len(rows) > page {
+		rows = rows[:page]
 	}
 	out := make([]Output, 0, len(rows))
 	for _, c := range rows {
@@ -390,7 +401,27 @@ func (h *Host) Answer(q *boxrec.Question) []Output {
 		if h.Tamper != nil {
 			b = h.Tamper(append([]byte(nil), b...))
 		}
-		out = append(out, Output{Beef: b})
+		out = append(out, Output{Beef: h.stale(b)})
+	}
+	return out
+}
+
+// stale rewrites the proof of a carrier's funding tree to name another
+// block when Stale is set.
+func (h *Host) stale(beef []byte) []byte {
+	if !h.Stale {
+		return beef
+	}
+	_, tx, _, err := guard.ParseBEEF(beef, 8<<20)
+	if err != nil || tx == nil || len(tx.Inputs) == 0 || tx.Inputs[0].SourceTransaction == nil || tx.Inputs[0].SourceTransaction.MerklePath == nil {
+		return beef
+	}
+	mp := *tx.Inputs[0].SourceTransaction.MerklePath
+	mp.BlockHeight += 3
+	tx.Inputs[0].SourceTransaction.MerklePath = &mp
+	out, err := tx.AtomicBEEF(false)
+	if err != nil {
+		return beef
 	}
 	return out
 }
