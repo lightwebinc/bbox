@@ -114,3 +114,81 @@ export class HandshakeBudget {
     }
   }
 }
+
+/**
+ * A budget of signed responses for each authenticated session. A handshake
+ * buys a session, and every answered request on it costs the host a
+ * signature, so one handshake must not buy signatures without end: each
+ * session is answered from its own bucket, and a request over it is
+ * refused 429 with Retry-After before anything is signed.
+ */
+export interface ResponseBudgetConfig {
+  /** Signed responses a second one session is given, and the most at once. */
+  perSec: number
+  burst: number
+}
+
+/** The defaults: far above what a reader walking pages needs, far below what a process signs. */
+export const DefaultResponseBudget: ResponseBudgetConfig = { perSec: 5, burst: 20 }
+
+/** Token buckets by key, at most max of them; past it the least recently used is forgotten. */
+export class KeyedBudget {
+  private readonly byKey = new Map<string, Bucket>()
+
+  constructor(
+    readonly c: ResponseBudgetConfig,
+    readonly max: number = MaxAddresses,
+    private readonly now: () => number = Date.now,
+  ) {
+    if (!(Number.isFinite(c.perSec) && c.perSec > 0)) throw new Error('KeyedBudget: perSec must be positive')
+    if (!(Number.isFinite(c.burst) && c.burst >= 1)) throw new Error('KeyedBudget: burst must be at least 1')
+    if (!Number.isSafeInteger(max) || max < 1) throw new Error('KeyedBudget: max must be at least 1')
+  }
+
+  get size(): number {
+    return this.byKey.size
+  }
+
+  /** Takes one from key's bucket, or says how long until one is there. */
+  take(key: string): { ok: true } | { ok: false; retryAfter: number } {
+    const now = this.now()
+    const b = this.byKey.get(key) ?? new Bucket(this.c.burst, now)
+    this.byKey.delete(key)
+    this.byKey.set(key, b)
+    while (this.byKey.size > this.max) this.byKey.delete(this.byKey.keys().next().value as string)
+    b.refill(this.c.perSec, this.c.burst, now)
+    if (b.tokens < 1) return { ok: false, retryAfter: b.wait(this.c.perSec) }
+    b.tokens -= 1
+    return { ok: true }
+  }
+}
+
+/** The most request identifiers remembered, to refuse one sent twice. */
+export const MaxSeenRequests = 65536
+
+/**
+ * The requests a route answered lately, by a key of the asker and the
+ * request's own identifier: a request sent again byte for byte is refused
+ * without a signature. Bounded, oldest forgotten first; the response
+ * budget bounds what a replay older than this memory can cost.
+ */
+export class SeenRequests {
+  private readonly seen = new Set<string>()
+
+  constructor(readonly max: number = MaxSeenRequests) {
+    if (!Number.isSafeInteger(max) || max < 1) throw new Error('SeenRequests: max must be at least 1')
+  }
+
+  get size(): number {
+    return this.seen.size
+  }
+
+  has(key: string): boolean {
+    return this.seen.has(key)
+  }
+
+  add(key: string): void {
+    this.seen.add(key)
+    while (this.seen.size > this.max) this.seen.delete(this.seen.values().next().value as string)
+  }
+}

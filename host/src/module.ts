@@ -15,6 +15,7 @@
  *   BBOX_MAX_BEEF         the host's BEEF bound; at least and by default 262144
  *   BBOX_LISTEN           host:port of the terms route (paid.ts)
  *   BBOX_PRICES           the classes priced, e.g. history=5,history-after=5
+ *                         (a class and its -after form together)
  *   BBOX_PAYEE_KEY        the payee's private key, 64 hex characters
  *   BBOX_HEADERS_URL      the header source payments verify against;
  *                         OVERLAY_CHAIN_TRACKER_URL when unset
@@ -26,6 +27,9 @@
  *                         answers, and at once; default 4 and 8 (budget.ts)
  *   BBOX_HANDSHAKES_PER_ADDR_PER_SEC, BBOX_HANDSHAKE_ADDR_BURST
  *                         the same for one remote address; default 1 and 4
+ *   BBOX_RESPONSES_PER_SEC, BBOX_RESPONSE_BURST
+ *                         the signed responses a second one BRC-104 session
+ *                         is given, and at once; default 5 and 20
  *
  * Every `tm_bbox_` topic in OVERLAY_TOPICS must be an office named here,
  * because a bbox topic left to the host's default manager would admit
@@ -36,7 +40,7 @@ import type { Server } from 'node:http'
 import { PrivateKey, ProtoWallet } from '@bsv/sdk'
 import type { Module, ModuleHost } from '@lightwebinc/bcommon'
 import { DefaultMaxBEEF } from './beef.js'
-import { DefaultBudget, type BudgetConfig } from './budget.js'
+import { DefaultBudget, DefaultResponseBudget, type BudgetConfig, type ResponseBudgetConfig } from './budget.js'
 import { LookupService, TopicPrefix, checkOffice, topic } from './boxrec.js'
 import { FileJournal, type Journal } from './journal.js'
 import { BboxLookupService, FloorDays } from './ls_bbox.js'
@@ -64,6 +68,7 @@ export interface Config {
   headersURL?: string
   sessions: { max: number; ttlSeconds: number }
   handshakes: BudgetConfig
+  responses: ResponseBudgetConfig
 }
 
 /** Parses BBOX_OFFICES. Throws on anything it cannot take exactly. */
@@ -121,6 +126,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
       perAddressPerSec: rate('BBOX_HANDSHAKES_PER_ADDR_PER_SEC', env['BBOX_HANDSHAKES_PER_ADDR_PER_SEC'], DefaultBudget.perAddressPerSec),
       addressBurst: integer('BBOX_HANDSHAKE_ADDR_BURST', env['BBOX_HANDSHAKE_ADDR_BURST'], DefaultBudget.addressBurst, 1),
     },
+    responses: {
+      perSec: rate('BBOX_RESPONSES_PER_SEC', env['BBOX_RESPONSES_PER_SEC'], DefaultResponseBudget.perSec),
+      burst: integer('BBOX_RESPONSE_BURST', env['BBOX_RESPONSE_BURST'], DefaultResponseBudget.burst, 1),
+    },
   }
   const listen = env['BBOX_LISTEN']?.trim()
   if (listen !== undefined && listen !== '') {
@@ -169,6 +178,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
   for (const why of ['cap', 'idle']) host.metrics.preset('bbox_sessions_evicted_total', { why })
   for (const reason of Reasons) host.metrics.preset('bbox_refused_total', { reason })
   for (const why of ['evidence', 'retention']) host.metrics.preset('bbox_dropped_total', { why })
+  for (const result of ['requested', 'accepted', 'refused', 'replayed']) host.metrics.preset('bbox_payments_total', { result })
   host.metrics.preset('bbox_retractions_total')
   const priced = new Set([...c.prices].filter(([, p]) => p > 0).map(([name]) => name))
   const ls = new BboxLookupService({
@@ -183,6 +193,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
   host.metrics.gauge('bbox_receipts', () => ls.receiptCount)
   host.metrics.gauge('bbox_sweeps', () => ls.sweepCount)
   host.metrics.gauge('bbox_outpoint_rows', () => ls.rowCount)
+  host.metrics.gauge('bbox_carrier_lines', () => ls.lineCount)
   const topics: Record<string, BboxTopicManager> = {}
   for (const office of c.offices) topics[topic(office)] = new BboxTopicManager(topic(office), host, undefined, c.maxBEEF)
   let front: LookupFront | undefined
@@ -196,6 +207,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
       headers: c.headersURL === undefined ? undefined : new HeaderTracker(c.headersURL),
       sessions: c.sessions,
       budget: c.handshakes,
+      responses: c.responses,
     })
   }
   const start = async (): Promise<Server | undefined> => {
@@ -217,6 +229,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
     priced: [...priced].join(',') || 'none',
     sessions: c.listen === undefined ? 'none' : `${c.sessions.max}, idle ${c.sessions.ttlSeconds}s`,
     handshakes: c.listen === undefined ? 'none' : `${c.handshakes.perSec}/s burst ${c.handshakes.burst}, per address ${c.handshakes.perAddressPerSec}/s burst ${c.handshakes.addressBurst}`,
+    responses: c.listen === undefined ? 'none' : `${c.responses.perSec}/s burst ${c.responses.burst} a session`,
     build,
   })
   return { module: { topics, lookups: { [LookupService]: ls } }, ls, front, start }

@@ -13,7 +13,7 @@ import { Transaction } from '@bsv/sdk'
 import type { Module, TopicManager } from '@lightwebinc/bcommon'
 import { LockTime } from '@lightwebinc/bcommon'
 import { LookupService, topic as topicOf } from './boxrec.js'
-import { DefaultBudget } from './budget.js'
+import { DefaultBudget, DefaultResponseBudget } from './budget.js'
 import { MemoryJournal } from './journal.js'
 import { BboxLookupService } from './ls_bbox.js'
 import { bboxModule, type Config } from './module.js'
@@ -46,7 +46,7 @@ function engine(mod: Module, storage: MemoryStorage, chain: Chain): Engine {
   )
 }
 
-const config: Config = { offices: [office], stateDir: '/nonexistent', retentionDays: 31, maxBEEF: 262144, prices: new Map(), sessions: { max: 100, ttlSeconds: 600 }, handshakes: DefaultBudget }
+const config: Config = { offices: [office], stateDir: '/nonexistent', retentionDays: 31, maxBEEF: 262144, prices: new Map(), sessions: { max: 100, ttlSeconds: 600 }, handshakes: DefaultBudget, responses: DefaultResponseBudget }
 
 /** A module and its engine, with storage handed over as the host does. */
 async function setup(opts: { naive?: boolean; journal?: MemoryJournal; chain?: Chain } = {}) {

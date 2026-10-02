@@ -1,7 +1,7 @@
 /** The handshake budget: the route's bucket, each address's, and the keys addresses share. */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DefaultBudget, HandshakeBudget, MaxAddresses, addressKey } from './budget.js'
+import { DefaultBudget, HandshakeBudget, KeyedBudget, MaxAddresses, SeenRequests, addressKey } from './budget.js'
 
 test('address keys: IPv4 as is, IPv4-mapped as IPv4, IPv6 by its /64', () => {
   assert.equal(addressKey('192.0.2.7'), '192.0.2.7')
@@ -57,4 +57,27 @@ test('addresses are forgotten once refilled, and never more than the cap', () =>
 test('a budget must be positive', () => {
   assert.throws(() => new HandshakeBudget({ ...DefaultBudget, perSec: 0 }), /perSec/)
   assert.throws(() => new HandshakeBudget({ ...DefaultBudget, addressBurst: 0.5 }), /burst/)
+})
+
+test('a keyed budget: each key its own bucket, refilled at its rate, and never more keys than the cap', () => {
+  let now = 0
+  const b = new KeyedBudget({ perSec: 2, burst: 3 }, 2, () => now)
+  assert.deepEqual([b.take('a'), b.take('a'), b.take('a')], [{ ok: true }, { ok: true }, { ok: true }])
+  assert.deepEqual(b.take('a'), { ok: false, retryAfter: 1 })
+  assert.deepEqual(b.take('b'), { ok: true }, 'another key is not charged')
+  now += 500
+  assert.deepEqual(b.take('a'), { ok: true }, 'half a second refills one')
+  b.take('c')
+  assert.equal(b.size, 2, 'the least recently used key was forgotten')
+  assert.throws(() => new KeyedBudget({ perSec: 0, burst: 1 }), /perSec/)
+  assert.throws(() => new KeyedBudget({ perSec: 1, burst: 0 }), /burst/)
+})
+
+test('seen requests are remembered up to a bound, oldest forgotten first', () => {
+  const s = new SeenRequests(3)
+  for (const k of ['a', 'b', 'c']) s.add(k)
+  assert.ok(s.has('a'))
+  s.add('d')
+  assert.deepEqual([s.has('a'), s.has('b'), s.has('d'), s.size], [false, true, true, 3])
+  assert.throws(() => new SeenRequests(0), /max/)
 })

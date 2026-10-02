@@ -7,6 +7,10 @@
  *   POST <base>/.well-known/auth  the BRC-104 handshake
  *   POST <base>/lookup            BRC-24 questions to ls_bbox, free and priced
  *
+ * Every authenticated request is answered with a signed response, so a
+ * session is given a budget of them, and a request sent twice is refused:
+ * one handshake does not buy signatures without end.
+ *
  * A free question is answered with or without BRC-104 authentication. A
  * question of a class the host prices must be asked over BRC-104; without a
  * payment it is answered 402 with BRC-105's headers (the version, the
@@ -37,7 +41,7 @@ import {
   type WalletInterface,
 } from '@bsv/sdk'
 import type { ModuleHost } from '@lightwebinc/bcommon'
-import { DefaultBudget, HandshakeBudget, type BudgetConfig } from './budget.js'
+import { DefaultBudget, DefaultResponseBudget, HandshakeBudget, KeyedBudget, SeenRequests, type BudgetConfig, type ResponseBudgetConfig } from './budget.js'
 import { LookupService as ServiceName } from './boxrec.js'
 import type { BboxLookupService } from './ls_bbox.js'
 import { PaymentProtocol } from './payment.js'
@@ -57,7 +61,8 @@ const AuthTimeout = 30_000
 /**
  * Parses a host's prices, `history=5,history-after=5`: a comma list of
  * `<class>=<satoshis>`, each a priceable class of spec section 7.2 once,
- * priced 0 to 2^53 - 1. A free class is refused: it never has a price.
+ * priced 0 to 2^53 - 1. A free class is refused: it never has a price. A
+ * class and its `-after` form are priced together or not at all.
  */
 export function parsePrices(raw: string | undefined): Map<string, number> {
   const out = new Map<string, number>()
@@ -73,6 +78,13 @@ export function parsePrices(raw: string | undefined): Map<string, number> {
     const v = e.slice(eq + 1)
     if (!/^(0|[1-9][0-9]*)$/.test(v) || !Number.isSafeInteger(Number(v))) throw new Error(`BBOX_PRICES: ${name}: "${v}" is not an integer from 0 to 2^53 - 1`)
     out.set(name, Number(v))
+  }
+  // A class and its -after form sell one walk: priced apart, the free one
+  // answers every page but the first for nothing.
+  for (const c of Classes) {
+    const after = `${c.name}-after`
+    if (!Classes.some((x) => x.name === after)) continue
+    if ((out.get(c.name) ?? 0) > 0 !== (out.get(after) ?? 0) > 0) throw new Error(`BBOX_PRICES: ${c.name} and ${after} are priced together or not at all`)
   }
   return out
 }
@@ -97,23 +109,61 @@ export interface ReceivedPayment {
   derivationSuffix: string
   senderIdentityKey: string
   class: string
+  /** Every outpoint the payment spends, `<txid>.<index>`, txid in display order. */
+  inputs: string[]
+}
+
+/** Every outpoint a transaction spends, `<txid>.<index>`. */
+export function spentOutpoints(tx: Transaction): string[] {
+  return tx.inputs.map((i) => `${i.sourceTXID ?? i.sourceTransaction?.id('hex') ?? ''}.${i.sourceOutputIndex}`)
+}
+
+/** What a receiver says of a payment offered to it. */
+export type Claim = 'accepted' | 'replayed' | 'conflict'
+
+/**
+ * The payments a receiver took, by txid and by the coins they spend. A
+ * payment is unbroadcast when it is offered, so two transactions spending
+ * one coin both verify, and at most one can ever be settled: the second is
+ * a conflict, whatever its txid.
+ */
+export class TakenPayments {
+  private readonly txids = new Set<string>()
+  private readonly coins = new Set<string>()
+
+  /** Why p cannot be taken, or undefined. */
+  refusal(p: Pick<ReceivedPayment, 'txid' | 'inputs'>): Exclude<Claim, 'accepted'> | undefined {
+    if (this.txids.has(p.txid)) return 'replayed'
+    if (p.inputs.length === 0 || p.inputs.some((i) => this.coins.has(i))) return 'conflict'
+    return undefined
+  }
+
+  take(p: Pick<ReceivedPayment, 'txid' | 'inputs'>): void {
+    this.txids.add(p.txid)
+    for (const i of p.inputs) this.coins.add(i)
+  }
 }
 
 /**
- * Where accepted payments go. claim records p and returns true, atomically,
- * unless its txid was claimed before: one payment buys one question.
+ * Where accepted payments go. claim records p and answers `accepted`,
+ * atomically, unless its txid was claimed before (`replayed`) or it spends
+ * a coin an accepted payment spent (`conflict`): one payment buys one
+ * question, and one coin pays once.
  */
 export interface PaymentReceiver {
-  claim(p: ReceivedPayment): boolean
+  claim(p: ReceivedPayment): Claim
 }
 
 /** Payments in memory, for tests. */
 export class MemoryReceiver implements PaymentReceiver {
   readonly payments: ReceivedPayment[] = []
-  claim(p: ReceivedPayment): boolean {
-    if (this.payments.some((x) => x.txid === p.txid)) return false
+  private readonly taken = new TakenPayments()
+  claim(p: ReceivedPayment): Claim {
+    const no = this.taken.refusal(p)
+    if (no !== undefined) return no
+    this.taken.take(p)
     this.payments.push(p)
-    return true
+    return 'accepted'
   }
 }
 
@@ -122,11 +172,13 @@ export class MemoryReceiver implements PaymentReceiver {
  * to disk before the question is answered: what the operator's wallet
  * internalizes (BRC-100 internalizeAction, protocol "wallet payment", output
  * 0, with the prefix, the suffix and the sender's identity key), which also
- * broadcasts it. The txids already in the file are claimed.
+ * broadcasts it. The txids already in the file are claimed, and so are the
+ * coins they spend: each line carries its payment's inputs, and a line
+ * written before it did is read from its transaction.
  */
 export class LedgerReceiver implements PaymentReceiver {
   readonly path: string
-  private readonly txids = new Set<string>()
+  private readonly taken = new TakenPayments()
   private fd: number | undefined
 
   constructor(dir: string) {
@@ -139,12 +191,25 @@ export class LedgerReceiver implements PaymentReceiver {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
     }
     for (const l of text.split('\n')) {
+      let v: { txid?: unknown; inputs?: unknown; beef?: unknown }
       try {
-        const v = JSON.parse(l) as { txid?: unknown }
-        if (typeof v.txid === 'string') this.txids.add(v.txid)
+        v = JSON.parse(l) as typeof v
       } catch {
         // a line cut short by a crash: its payment was never answered
+        continue
       }
+      if (typeof v?.txid !== 'string') continue
+      let inputs: string[] = []
+      if (Array.isArray(v.inputs) && v.inputs.every((i) => typeof i === 'string')) {
+        inputs = v.inputs as string[]
+      } else if (typeof v.beef === 'string') {
+        try {
+          inputs = spentOutpoints(Transaction.fromAtomicBEEF(Utils.toArray(v.beef, 'base64')))
+        } catch {
+          // the txid alone is claimed
+        }
+      }
+      this.taken.take({ txid: v.txid, inputs })
     }
     if (text.length > 0 && !text.endsWith('\n')) this.write('\n')
   }
@@ -155,11 +220,12 @@ export class LedgerReceiver implements PaymentReceiver {
     fdatasyncSync(this.fd)
   }
 
-  claim(p: ReceivedPayment): boolean {
-    if (this.txids.has(p.txid)) return false
-    this.txids.add(p.txid)
+  claim(p: ReceivedPayment): Claim {
+    const no = this.taken.refusal(p)
+    if (no !== undefined) return no
+    this.taken.take(p)
     this.write(JSON.stringify({ ...p, beef: toBase64(Uint8Array.from(p.beef)), at: Math.floor(Date.now() / 1000) }) + '\n')
-    return true
+    return 'accepted'
   }
 
   close(): void {
@@ -461,7 +527,12 @@ export interface FrontOptions {
   sessions?: { max: number; ttlSeconds: number }
   /** The handshake budget (budget.ts); DefaultBudget when unset. */
   budget?: BudgetConfig
+  /** The budget of signed responses for each session (budget.ts); DefaultResponseBudget when unset. */
+  responses?: ResponseBudgetConfig
 }
+
+/** bbox_requests_total's results: authenticated requests refused before any signature. */
+export const RequestResults = ['replayed', 'limited'] as const
 
 /** bbox_handshakes_total's results. */
 export const HandshakeResults = ['accepted', 'failed', 'limited_address', 'limited_global'] as const
@@ -473,6 +544,12 @@ export class LookupFront {
   readonly sessions: BoundedSessions
   /** What handshakes the route answers. */
   readonly budget: HandshakeBudget
+  /** What signed responses each session is given. */
+  readonly responses: KeyedBudget
+  /** The authenticated requests answered lately: one sent twice is refused. */
+  readonly seen = new SeenRequests()
+  /** Requests whose signature is being checked now. */
+  private readonly verifying = new Set<string>()
 
   constructor(private readonly o: FrontOptions) {
     for (const [name, price] of o.prices) {
@@ -484,6 +561,8 @@ export class LookupFront {
     this.sessions = new BoundedSessions(bound.max, bound.ttlSeconds * 1000, Date.now, (why) => o.host.metrics.inc('bbox_sessions_evicted_total', { why }))
     o.host.metrics.gauge('bbox_sessions', () => this.sessions.size)
     this.budget = new HandshakeBudget(o.budget ?? DefaultBudget)
+    this.responses = new KeyedBudget(o.responses ?? DefaultResponseBudget, bound.max)
+    for (const result of RequestResults) o.host.metrics.preset('bbox_requests_total', { result })
     for (const result of HandshakeResults) o.host.metrics.preset('bbox_handshakes_total', { result })
     if (o.wallet !== undefined) this.peer = new Peer(o.wallet as WalletInterface, this.transport, undefined, this.sessions as never, false)
   }
@@ -600,6 +679,16 @@ export class LookupFront {
       return
     }
     const idBytes = Array.from(id)
+    // A request already answered, or being answered, is refused before any
+    // work: sent again byte for byte it would otherwise cost the host a
+    // signature each time and its sender nothing.
+    const once = `${identityKey}:${requestId}`
+    if (this.seen.has(once) || this.verifying.has(once)) {
+      this.o.host.metrics.inc('bbox_requests_total', { result: 'replayed' })
+      send(res, failure(401, 'ERR_AUTH_REPLAYED', 'this request was already answered'))
+      return
+    }
+    this.verifying.add(once)
     try {
       await this.transport.deliver({
         version,
@@ -612,6 +701,18 @@ export class LookupFront {
       })
     } catch {
       send(res, failure(401, 'ERR_AUTH_FAILED', 'the request does not verify'))
+      return
+    } finally {
+      this.verifying.delete(once)
+    }
+    // Remembered only once it verified, so nobody fills the memory with requests it cannot sign.
+    this.seen.add(once)
+    // The session's budget of signed responses, taken only by a request that
+    // verified, so nobody spends another session's. Over it, nothing is signed.
+    const allowed = this.responses.take(yourNonce)
+    if (!allowed.ok) {
+      this.o.host.metrics.inc('bbox_requests_total', { result: 'limited' })
+      send(res, json(429, { status: 'error', code: 'ERR_RATE_LIMITED', description: 'too many requests on this session; try again later' }, { 'retry-after': String(allowed.retryAfter) }))
       return
     }
     const reply = await this.route(method, url, req.headers, body, identityKey)
@@ -692,7 +793,8 @@ export class LookupFront {
    * a prefix this server issued, an Atomic BEEF whose output 0 holds at least
    * the price and pays the key BRC-29 derives for the prefix, the suffix and
    * the asker, a transaction that verifies against the host's headers (full
-   * SPV, no fee check), and a txid never claimed before.
+   * SPV, no fee check), a txid never claimed before, and no input an
+   * accepted payment already spent.
    */
   private async pay(raw: string, identity: string, price: number, cls: string): Promise<{ ok: true; satoshis: number } | { ok: false; reply: Reply }> {
     const bad = (status: number, code: string, d: string) => ({ ok: false as const, reply: failure(status, code, d) })
@@ -744,8 +846,11 @@ export class LookupFront {
       derivationSuffix: suffix,
       senderIdentityKey: identity,
       class: cls,
+      inputs: spentOutpoints(tx),
     }
-    if (!this.o.receiver!.claim(accepted)) return bad(409, 'ERR_PAYMENT_REPLAYED', 'this payment was already used')
+    const claim = this.o.receiver!.claim(accepted)
+    if (claim === 'replayed') return bad(409, 'ERR_PAYMENT_REPLAYED', 'this payment was already used')
+    if (claim === 'conflict') return bad(409, 'ERR_PAYMENT_CONFLICT', 'this payment spends a coin an earlier payment spent')
     this.o.host.log('bbox payment accepted', { txid: accepted.txid, satoshis: accepted.satoshis, class: cls })
     return { ok: true, satoshis: accepted.satoshis }
   }

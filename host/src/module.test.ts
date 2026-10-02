@@ -34,11 +34,12 @@ test('the configuration: a state directory is required, floors hold, and a price
   assert.throws(() => parseConfig({ ...base, BBOX_MAX_BEEF: '1000' }), /at least 262144/)
   assert.throws(() => parseConfig({ ...base, BBOX_LISTEN: 'nowhere' }), /host:port/)
   assert.throws(() => parseConfig({ ...base, BBOX_PAYEE_KEY: 'AB'.repeat(32) }), /64 lowercase hex/)
-  assert.throws(() => parseConfig({ ...base, BBOX_PRICES: 'history=5' }), /BBOX_LISTEN/)
+  assert.throws(() => parseConfig({ ...base, BBOX_PRICES: 'history=5,history-after=5' }), /BBOX_LISTEN/)
+  assert.throws(() => parseConfig({ ...base, BBOX_PRICES: 'history=5', BBOX_LISTEN: '127.0.0.1:1', BBOX_PAYEE_KEY: '11'.repeat(32) }), /history and history-after are priced together/)
   assert.throws(() => parseConfig({ ...base, BBOX_PRICES: 'history=0' }), /BBOX_LISTEN/)
   const priced = parseConfig({
     ...base,
-    BBOX_PRICES: 'history=5',
+    BBOX_PRICES: 'history=5,history-after=5',
     BBOX_LISTEN: '[::1]:8081',
     BBOX_PAYEE_KEY: '11'.repeat(32),
     OVERLAY_CHAIN_TRACKER_URL: 'http://127.0.0.1:1',
@@ -46,6 +47,10 @@ test('the configuration: a state directory is required, floors hold, and a price
   assert.deepEqual([priced.listen, priced.headersURL, priced.prices.get('history')], [{ host: '::1', port: 8081 }, 'http://127.0.0.1:1', 5])
   assert.equal(parseConfig({ ...base, BBOX_RETENTION_DAYS: '90', BBOX_MAX_BEEF: '1048576' }).retentionDays, 90)
   assert.deepEqual(c.sessions, { max: 10000, ttlSeconds: 600 }, 'the BRC-104 session bound has a default')
+  assert.deepEqual(c.responses, { perSec: 5, burst: 20 }, 'the budget of signed responses a session has a default')
+  assert.deepEqual(parseConfig({ ...base, BBOX_RESPONSES_PER_SEC: '0.5', BBOX_RESPONSE_BURST: '3' }).responses, { perSec: 0.5, burst: 3 })
+  assert.throws(() => parseConfig({ ...base, BBOX_RESPONSE_BURST: '0' }), /BBOX_RESPONSE_BURST/)
+  assert.throws(() => parseConfig({ ...base, BBOX_RESPONSES_PER_SEC: '0' }), /BBOX_RESPONSES_PER_SEC/)
   assert.deepEqual(parseConfig({ ...base, BBOX_SESSIONS: '50', BBOX_SESSION_TTL: '60' }).sessions, { max: 50, ttlSeconds: 60 })
   assert.throws(() => parseConfig({ ...base, BBOX_SESSIONS: '0' }), /BBOX_SESSIONS/)
   assert.throws(() => parseConfig({ ...base, BBOX_SESSION_TTL: 'soon' }), /BBOX_SESSION_TTL/)
