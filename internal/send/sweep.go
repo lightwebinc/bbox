@@ -17,6 +17,8 @@ import (
 	"github.com/lightwebinc/bcommon/mint"
 	"github.com/lightwebinc/bcommon/producer"
 
+	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/internal/reader"
 	"github.com/lightwebinc/bbox/internal/state"
 )
 
@@ -61,10 +63,34 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 	if len(left) == 0 {
 		return e.sweptBy(txid, vouts[0]), nil
 	}
+	if _, ok := e.TreeOf(txid); !ok {
+		return nil, fmt.Errorf("transaction %s is not a funding tree this home keeps", txid)
+	}
+	// An output the chain already shows spent cannot be swept again, and a
+	// sweep that named it would be refused whole, for good: the node is
+	// asked about each, and what another transaction spends is left out
+	// and that spend taken as the sweep it is.
+	left, err := e.adoptSpends(ctx, txid, left, offices)
+	if err != nil {
+		return nil, err
+	}
+	if len(left) == 0 {
+		for _, v := range vouts {
+			if sw := e.sweptBy(txid, v); sw != nil {
+				return sw, nil
+			}
+		}
+		return nil, fmt.Errorf("every output named of funding tree %s is spent by a transaction that has not mined yet, or that the node could not show: nothing is swept now; the next drop takes that spend as the sweep once it mines", short(txid))
+	}
 	vouts = left
 	tree, err := e.kept.Tx(txid)
 	if err != nil {
 		return nil, err
+	}
+	if tree.MerklePath != nil {
+		if err := e.reproveTree(ctx, tree); err != nil {
+			return nil, err
+		}
 	}
 	payer := e.NewPayer()
 	fee, coin, err := e.sweepFee(ctx, payer)
@@ -98,6 +124,78 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 		return &e.St.Sweeps[len(e.St.Sweeps)-1], err
 	}
 	return &e.St.Sweeps[len(e.St.Sweeps)-1], nil
+}
+
+// adoptSpends asks the node what spends each of vouts of the funding tree
+// txid, and returns those still to sweep. An output another transaction
+// spends is left out. Once that transaction is mined it is recorded as the
+// sweep of the outputs of the tree it spends, and published as one to
+// offices when a host would admit it: the sweep of another copy of this
+// home, or one of this home's that an earlier run gave up on and that
+// mined all the same. An output whose spender is not mined yet is left for
+// the next run. A node that cannot answer leaves the output in: the sweep
+// is then what finds out.
+func (e *Engine) adoptSpends(ctx context.Context, txid string, vouts []uint32, offices []string) ([]uint32, error) {
+	if e.Legs.Asset == nil {
+		return vouts, nil
+	}
+	var left []uint32
+	spenders := map[string]bool{}
+	var order []string
+	for _, v := range vouts {
+		by, err := e.Legs.Asset.Spender(ctx, txid, v)
+		if err != nil || by == "" {
+			left = append(left, v)
+			continue
+		}
+		if !spenders[by] {
+			spenders[by] = true
+			order = append(order, by)
+		}
+	}
+	for _, by := range order {
+		if _, err := reader.Hash(by); err != nil {
+			e.note("funding tree %s: the node names a spender that is not a transaction id; its outputs are left for the next run", short(txid))
+			continue
+		}
+		raw, err := e.Legs.Asset.TxRaw(ctx, by)
+		if err != nil {
+			e.note("funding tree %s: an output is spent by %s, which the node could not show (%v); it is left for the next run", short(txid), short(by), err)
+			continue
+		}
+		tx, err := guard.ParseTransaction(raw, guard.DefaultBound)
+		if err != nil || tx.TxID().String() != by {
+			e.note("funding tree %s: an output is spent by %s, and the node answered other bytes for it; it is left for the next run", short(txid), short(by))
+			continue
+		}
+		mp, height, err := e.Legs.Asset.Proof(ctx, by)
+		if err != nil {
+			e.note("funding tree %s: an output is spent by %s, which has not mined yet; it is left for the next run", short(txid), short(by))
+			continue
+		}
+		var spent []uint32
+		for _, in := range tx.Inputs {
+			if in.SourceTXID != nil && in.SourceTXID.String() == txid {
+				spent = append(spent, in.SourceTxOutIndex)
+			}
+		}
+		if len(spent) == 0 {
+			continue
+		}
+		sw := state.Sweep{Tree: txid, Vouts: spent, Offices: slices.Clone(offices), Txid: by, RawHex: tx.Hex(), BumpHex: mp.Hex(),
+			Height: height, Submitted: true, Adopted: true}
+		// One this home built and gave up on is taken back as it is.
+		e.St.Sweeps = slices.DeleteFunc(e.St.Sweeps, func(x state.Sweep) bool { return x.Txid == by })
+		e.St.Sweeps = append(e.St.Sweeps, sw)
+		if err := e.St.Save(); err != nil {
+			return nil, err
+		}
+		e.note("funding tree %s: %d output(s) are already spent by %s, mined at height %d: it is taken as their sweep", short(txid), len(spent), short(by), height)
+		if err := e.FinishSweep(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return left, nil
 }
 
 // sweepFee takes the sweep's fee coin, and the coin as the pool held it,
@@ -194,9 +292,28 @@ func (e *Engine) FinishSweep(ctx context.Context) error {
 		}
 		tx.MerklePath = mp
 	}
+	if changed, err := e.current(ctx, tx); err == nil && changed {
+		// A sweep mined again after a reorganisation: its current proof.
+		sw.BumpHex, sw.Height = tx.MerklePath.Hex(), tx.MerklePath.BlockHeight
+		if err := e.St.Save(); err != nil {
+			return err
+		}
+	}
 	beef, err := tx.AtomicBEEF(false)
 	if err != nil {
 		return err
+	}
+	admitted := true
+	if sw.Adopted {
+		// A spend this home did not build may not be a sweep a host
+		// admits. It is mined all the same, so the outputs are spent.
+		for _, office := range sw.Offices {
+			if a, err := boxrec.Admit(ctx, beef, nil, boxrec.Host{Office: office, Headers: e.Legs.Headers}); (err != nil && !errors.Is(err, boxrec.ErrUnmined)) || (err == nil && a.Kind != boxrec.TxSweep) {
+				e.note("the transaction %s that spends the outputs is not a sweep a host admits: it is recorded and not published", short(sw.Txid))
+				admitted = false
+				break
+			}
+		}
 	}
 	p := state.Pending{Kind: state.KindSweep, Offices: sw.Offices, Txid: sw.Txid, Beef: hex.EncodeToString(beef),
 		Outpoint: fmt.Sprintf("%s.%d", sw.Tree, sw.Vouts[0])}
@@ -206,6 +323,9 @@ func (e *Engine) FinishSweep(ctx context.Context) error {
 		if s.Tree == sw.Tree && slices.Contains(sw.Vouts, s.Vout) {
 			s.Swept = sw.Txid
 		}
+	}
+	if !admitted {
+		return e.St.Save()
 	}
 	e.St.Outbox = append(e.St.Outbox, p)
 	if err := e.St.Save(); err != nil {

@@ -75,7 +75,45 @@ type State struct {
 	// for the send rate.
 	LastSentMs int64 `json:"lastSentMs,omitempty"`
 
-	path string
+	// Payments are the payments this identity made for priced questions
+	// that have not mined yet, each as the BEEF the host was handed. A
+	// payment is recorded before it is sent: from then on the host holds a
+	// transaction that spends the coin.
+	Payments []Payment `json:"payments,omitempty"`
+
+	// Taking is the coin pool as it stood when a command that spends from
+	// it last saved this state: the record made before a coin is taken. A
+	// coin leaves the pool's own file the moment it is taken, before the
+	// transaction that spends it is recorded here, so a run that stops in
+	// between leaves a coin in neither. The next command finds it in this
+	// list and in no transaction the home records, and puts it back when
+	// the node shows it unspent. It is empty whenever no command is
+	// running.
+	Taking []bwallet.Output `json:"taking,omitempty"`
+
+	path       string
+	beforeSave func()
+}
+
+// OnSave sets what runs before every Save: a publisher records the pool
+// with it. Nil clears it.
+func (s *State) OnSave(f func()) { s.beforeSave = f }
+
+// Payment is a payment this identity made for a priced question.
+type Payment struct {
+	Txid string `json:"txid"`
+	// Beef is the payment as the host was handed it, hex.
+	Beef string `json:"beef"`
+}
+
+// KeepPayments drops every payment whose transaction is not among unmined,
+// the transactions whose change the pool still holds unproven: once a
+// payment mined, its change is an ordinary coin and the record is done
+// with. It reports whether anything was dropped.
+func (s *State) KeepPayments(unmined []string) bool {
+	n := len(s.Payments)
+	s.Payments = slices.DeleteFunc(s.Payments, func(p Payment) bool { return !slices.Contains(unmined, p.Txid) })
+	return len(s.Payments) != n
 }
 
 // Pending is one object persisted before it is published.
@@ -137,7 +175,11 @@ type Sweep struct {
 	Vouts   []uint32 `json:"vouts"`
 	Offices []string `json:"offices"`
 	Txid    string   `json:"txid"`
-	RawHex  string   `json:"rawHex"`
+	// Adopted is set for a spend this home did not build, or built and
+	// gave up on: the node named it as the spender of an output, and the
+	// home took it as the sweep it is.
+	Adopted bool   `json:"adopted,omitempty"`
+	RawHex  string `json:"rawHex"`
 	// BumpHex and Height are set once it mined.
 	BumpHex   string `json:"bumpHex,omitempty"`
 	Height    uint32 `json:"height,omitempty"`
@@ -214,6 +256,9 @@ func Load(home, identity string) (*State, error) {
 
 // Save writes the state atomically at mode 0600.
 func (s *State) Save() error {
+	if s.beforeSave != nil {
+		s.beforeSave()
+	}
 	raw, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
