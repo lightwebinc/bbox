@@ -199,12 +199,15 @@ func (e *Engine) adoptSpends(ctx context.Context, txid string, vouts []uint32, o
 }
 
 // sweepFee takes the sweep's fee coin, and the coin as the pool held it,
-// so a refused sweep can give it back. When every coin left is change from
-// a transaction not yet mined (a tree minted ahead took the last proven
-// coin, say), it waits up to Opts.Wait for that change to mine rather than
-// fail: a drop waits for a block anyway.
+// so a refused sweep can give it back. A tree minted ahead in this run
+// holds a coin until its mint is collected: the take waits for that mint,
+// up to Opts.Wait, and collects it (producer.Payer.Take). When every coin
+// left is then change from a transaction not yet mined (that tree's, say),
+// it waits up to Opts.Wait for that change to mine rather than fail: a drop
+// waits for a block anyway.
 func (e *Engine) sweepFee(ctx context.Context, payer *producer.Payer) (mint.Input, *bwallet.Output, error) {
 	var deadline time.Time
+	again := false
 	for {
 		before := e.Pool.Outputs()
 		fee, err := payer.Take(ctx)
@@ -238,7 +241,14 @@ func (e *Engine) sweepFee(ctx context.Context, payer *producer.Payer) (mint.Inpu
 				return fee, &before[i], nil
 			}
 		}
-		return fee, nil, nil
+		if again {
+			return fee, nil, nil
+		}
+		// The coin reached the pool inside the take, when a tree minted
+		// ahead was collected. It goes back and is taken again, so that it
+		// is recorded as the pool holds it.
+		payer.GiveBack()
+		again = true
 	}
 }
 

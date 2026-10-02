@@ -223,8 +223,13 @@ func FeeError(err error) error {
 	var nk *producer.NoKeyError
 	switch {
 	case errors.As(err, &nc):
-		if nc.Held > 0 {
+		switch {
+		case nc.Held > 0 && nc.Minting > 0:
+			return fmt.Errorf("fee input: %w: the other coins are change from %d transaction(s) whose proofs have not arrived, and %d funding tree(s) minted ahead hold a coin and have not settled; they become spendable once mined, so run the command again", nc.Err, nc.Held, nc.Minting)
+		case nc.Held > 0:
 			return fmt.Errorf("fee input: %w: the other coins are change from %d transaction(s) whose proofs have not arrived; they become spendable once mined", nc.Err, nc.Held)
+		case nc.Minting > 0:
+			return fmt.Errorf("fee input: %w: %d funding tree(s) minted ahead hold a coin and have not settled; the change returns once one does, so run the command again", nc.Err, nc.Minting)
 		}
 		return fmt.Errorf("fee input: %w (run `bbox fund`)", nc.Err)
 	case errors.As(err, &nk):

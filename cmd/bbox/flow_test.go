@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -12,8 +14,11 @@ import (
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
+	"github.com/lightwebinc/bbox/internal/send"
 	"github.com/lightwebinc/bbox/internal/testchain"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -804,6 +809,107 @@ func TestDropWaitsForChangeToMine(t *testing.T) {
 	r := h.must("alice", "", "drop", first)
 	if !strings.Contains(r.stderr, "waiting for one") || !strings.Contains(r.stdout, "retracted 1 funding output(s)") {
 		t.Fatalf("drop:\n%s\n%s", r.stdout, r.stderr)
+	}
+}
+
+// A funding tree minted ahead takes a coin when the mint starts, and its
+// change reaches the pool only when the mint is collected. A home with one
+// coin has none in between. A sweep in the same run needs a fee in that
+// time: the take waits for the mint, collects it, and the sweep is paid
+// from the tree's change once it mines. When the settlement leg refuses the
+// tree, the coin itself comes back at the collection and pays the sweep.
+// Either way the sweep records its fee coin.
+func TestASweepFeeWaitsForATreeMintedAhead(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name    string
+		refused bool
+		notes   []string
+	}{
+		{"minted", false, []string{"is minted ahead and waits for the switch", "sweep fee: every coin is change from 1 transaction(s) not yet mined; waiting for one"}},
+		{"refused", true, []string{"the next funding tree was not minted ahead"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			// One block is one coin, which the blocks bob mines mature.
+			h.must("alice", "", "init")
+			h.must("alice", "", "fund", "-blocks", "1")
+			bob := h.identity("bob")
+			h.newOffice("bob")
+			h.want(h.run("alice", "", "doctor"), 0, "pool        1 output(s)")
+			first := h.send("alice", bob, "one")
+
+			ctx := context.Background()
+			g, _, errb := h.global("alice")
+			hm, err := g.openHome()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer hm.close()
+			eng, err := g.engine(ctx, hm, 4)
+			if err != nil {
+				t.Fatalf("%v\n%s", err, errb)
+			}
+			defer func() { _ = eng.Close(ctx) }()
+			if n := hm.e.Pool.Count(); n != 1 {
+				t.Fatalf("the home holds %d coins, want 1", n)
+			}
+			// The next transaction to reach the node is the tree minted
+			// ahead. It is kept from the node until the sweep's fee has
+			// been asked for, so the mint is in flight then.
+			asked := make(chan struct{})
+			var once sync.Once
+			var tree atomic.Value
+			h.mu.Lock()
+			h.onSend = func(tx *transaction.Transaction) {
+				tree.Store(tx.TxID().String())
+				select {
+				case <-asked:
+				case <-time.After(20 * time.Second):
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			if c.refused {
+				h.refuse = func(tx *transaction.Transaction) bool { return tx.TxID().String() == tree.Load() }
+			}
+			h.mu.Unlock()
+			note := eng.Note
+			eng.Note = func(format string, args ...any) {
+				if strings.HasPrefix(format, "no coin is spendable") {
+					once.Do(func() { close(asked) })
+				}
+				note(format, args...)
+			}
+			key, _ := hex.DecodeString(bob)
+			// The second envelope leaves two outputs, so the next tree is
+			// minted ahead from the one coin.
+			if _, err := eng.Envelope(ctx, send.Letter{Office: h.office, To: key, Box: "inbox", Created: uint64(time.Now().Unix()), Plaintext: []byte(`{"body":"two"}`)}); err != nil { //nolint:gosec // a clock after 1970
+				t.Fatalf("%v\n%s", err, errb)
+			}
+			if !strings.Contains(errb.String(), "so the next is minted ahead") {
+				t.Fatalf("no tree was minted ahead:\n%s", errb)
+			}
+			if n := hm.e.Pool.Count(); n != 0 {
+				t.Fatalf("the home holds %d coins while its tree is minted, want 0", n)
+			}
+			s := hm.st.SentByTxid(first)
+			sw, err := eng.Retract(ctx, s.Tree, []uint32{s.Vout}, []string{s.Office})
+			if err != nil {
+				t.Fatalf("the sweep: %v\n%s", err, errb)
+			}
+			if !h.chain.Mined(sw.Txid) || sw.Fee == nil {
+				t.Fatalf("sweep %s: mined %v, fee coin %v\n%s", sw.Txid, h.chain.Mined(sw.Txid), sw.Fee, errb)
+			}
+			if id, _ := tree.Load().(string); id == "" || h.chain.Mined(id) == c.refused {
+				t.Fatalf("the tree minted ahead: mined %v, refused %v", !c.refused, c.refused)
+			}
+			for _, want := range append([]string{"1 funding tree(s) minted ahead hold one: waiting for the change"}, c.notes...) {
+				if !strings.Contains(errb.String(), want) {
+					t.Fatalf("no %q:\n%s", want, errb)
+				}
+			}
+		})
 	}
 }
 

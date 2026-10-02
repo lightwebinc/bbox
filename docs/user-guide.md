@@ -317,7 +317,9 @@ every endpoint answers.
 Common messages:
 
 - `fee input: ... no spendable output`: fund the home (`bbox fund`). If it
-  says coins are change not yet mined, wait for a block.
+  says coins are change not yet mined, wait for a block. If it says a
+  funding tree minted ahead holds a coin and has not settled, run the
+  command again: the change returns once the tree settles.
 - `a sweep is still in flight`: the previous drop did not finish; `bbox
   drop` again finishes it.
 - `host ...: DISAGREES`: one host lacks an envelope another has; `bbox list

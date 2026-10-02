@@ -193,10 +193,12 @@ became of the tree before it spends anything, and says what it found:
 
 | The node shows | The command does | It says |
 | --- | --- | --- |
-| the tree, and the current tree is used up or there is none | adopts the tree and takes its unspent change into the pool | `funding tree ... is recovered` |
-| the tree, and the current tree still has outputs | holds the tree, behind any tree already held, takes its change, and adopts it when the trees before it run out; the record stays until then | `funding tree ... is recovered and waits for the switch` |
+| the tree, its coin not spent by another transaction, and the current tree is used up or there is none | adopts the tree and takes its unspent change into the pool | `funding tree ... is recovered` |
+| the tree, its coin not spent by another transaction, and the current tree still has outputs | holds the tree, behind any tree already held, takes its change, and adopts it when the trees before it run out; the record stays until then | `funding tree ... is recovered and waits for the switch` |
 | no such tree, and the coin unspent | puts the coin back in the pool and keeps the record for one more command; the second such answer drops it | `... never reached the chain: its fee coin ... is unspent and back in the pool`, then `its record is kept for one more command` |
 | no such tree, and the coin spent by another transaction | drops the record | `... never reached the chain: its fee coin ... is spent by ...` |
+| the tree, with no proof, and the coin spent by another transaction | drops the record and adopts nothing: the tree lost a double spend and never mines, though the node still serves it | `... lost a double spend: the node still serves it, without a proof, and its fee coin ... is spent by ...` |
+| the tree, with no proof, and it cannot say who spent the coin | keeps the record and goes on; the next command asks again | `... could not be settled now (...): its record is kept and the next command asks again` |
 | nothing: it cannot be asked, or cannot say | keeps the record and goes on; the next command asks again | `... could not be settled now (...): its record is kept and the next command asks again` |
 
 A tree that reaches the node after its coin went back is found by the next

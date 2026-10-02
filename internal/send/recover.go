@@ -41,15 +41,18 @@ func (e *Engine) prepareTree(tree funding.Tree, coin bwallet.Output) error {
 //     the order of their records, and the switch takes them in that order.
 //     A held tree is recorded among the trees minted ahead, and its record
 //     stays until the switch adopts it;
-//   - a tree the node does not know whose coin another transaction spent is
-//     gone, and its record is dropped;
+//   - a tree with no proof whose coin another transaction spent is gone,
+//     whether the node does not know it or still serves it after it lost a
+//     double spend, and its record is dropped;
 //   - a tree the node does not know whose coin is unspent never reached the
 //     chain as far as the node can say now. The coin goes back to the pool,
 //     and the record is kept for one more command: a tree handed to the leg
 //     an instant before the run stopped can reach the node later. The
 //     second such answer drops the record;
 //   - a node that cannot answer decides nothing: the record stays, the next
-//     command asks again, and this one goes on.
+//     command asks again, and this one goes on. So does a node that serves
+//     an unproven tree and cannot say who spent its coin: trees are settled
+//     without waiting for a block, and none is adopted on that alone.
 //
 // A coin the pool holds although the chain shows it spent (it was put back
 // before the tree landed) is taken out of the pool by the library, which
