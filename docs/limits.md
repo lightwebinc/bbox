@@ -37,11 +37,13 @@ environment ([host.md](host.md)); a client cannot change it.
 | Limit | Default | Hard cap | Why | Plane and unicast |
 | --- | --- | --- | --- | --- |
 | Hosts named (`hosts`) | none | 16 | A reader asks every host it names; a unicast publisher uploads every object to each | Unicast warns above 5: past that the plane is what removes the cost |
-| Quorum (`quorum`) | `all` | the host count | A quorum no host set can meet would refuse every publish | Unicast only; warns below a majority. A sweep always needs every host named |
+| Quorum (`quorum`) | `all` | the host count | A quorum no host set can meet would refuse every publish | For envelopes and receipts, in both modes: in unicast the hosts that took one, on the plane the hosts that answer it by lookup (when `hosts` and `header_url` are set). Unicast warns below a majority. A sweep always needs every host named |
+| Wait for the plane to deliver an object | 3.5 s a host (0.5, 1 and 2 s between lookups) | fixed | The plane delivers in well under a second; a host still without it is offered it directly. Fewer hosts than the quorum answering it leaves it in the outbox | Plane only |
 | Tries per submission | 4, waiting 1, 2 and 4 s | fixed | A host that fails four tries is reported missed; the object stays persisted and the next command resends it | Plane: the facade (a sweep also to each other host named); unicast: each host on its own |
 | Request timeout (`timeout`) | 15 s | 1 s to 5 min | Bounds every request, so one host holds an object up for at most four timeouts and 7 s | Same |
 | Envelopes per answer page | 64 | 64 (spec) | Bounds an answer | Same |
-| Pages a client reads per list | until an answer is short | 64 pages (4096 envelopes) | Each page is a lookup and up to 64 verifications | Same |
+| Pages a client reads per list | until an answer is short | 64 pages (4096 envelopes), 128 outputs taken from one page, 256 MiB held from one host's walk | Each page is a lookup and up to 64 verifications. A page over the contract's is cut, and a host whose full page does not move past its cursor is asked no further; either is reported as truncated | Same |
+| One lookup answer | as answered | 16 MiB | A full page of the largest envelopes fits several times over; a larger answer is an error, not read | Same |
 | Receipts per `receipt` answer, sweeps per `sweep` answer | 8 | 8 (spec) | One is the normal answer | Same |
 | Envelopes a `list -fill` copies | every one a host lacks | the listing's (4096 a host) | Each copy is one submit and one lookup at the host that lacks it | Off the plane, or a host a unicast publisher missed; on the plane a host that was down is repaired by the plane |
 | Acknowledgements per receipt | every envelope named in one `ack` | 64 (the record bound) | One receipt carrier per 64 envelopes rather than one each | Same |
@@ -50,16 +52,28 @@ environment ([host.md](host.md)); a client cannot change it.
 
 | Limit | Default | Hard cap | Why | Plane and unicast |
 | --- | --- | --- | --- | --- |
-| Sweeps in flight per home | one | one | A sweep is persisted, settled and waited for before the next is built, so no output is swept twice. One the leg did not take stays in flight and the next `drop` finishes it first; one the network refuses for good is marked failed and frees the next | Same |
+| Sweeps in flight per home | one | one | A sweep is persisted, settled and waited for before the next is built, so no output is swept twice. One the leg did not take, or refused while its inputs are still its own, stays in flight and the next `drop` finishes it first; one an input of which the node shows spent by another transaction is marked failed and frees the next | Same |
+| Outputs the chain already shows spent | left out of the sweep; the spender, once mined, is taken as their sweep | none | A sweep naming a spent output is refused whole, for good. One node question an output | Same |
+| Tries to build a sweep an input of which another transaction took | 3 | fixed | The fee coin, or an output swept since the node was asked | Same |
 | Wait for a sweep to mine | 10 min | fixed | A drop waits for one block, about 30 s on a test chain and 10 min on a busy main chain; past the wait the sweep stays in flight | Same |
 | Wait for a fee coin | up to the same 10 min, only when every coin is change not yet mined | fixed | A tree minted ahead can take the last proven coin; its change becomes spendable when it mines, and the drop waits for a block anyway | Same |
+
+### Coins
+
+| Limit | Default | Hard cap | Why | Plane and unicast |
+| --- | --- | --- | --- | --- |
+| Coin taken by a run that stopped before it recorded the spend | found by the next command from the pool the state recorded, and put back when the node shows it unspent | none | The pool and the state are two files; the state records the pool before a coin leaves it | Same |
+| Coin taken while a funding tree was minted, when the run stopped after the tree was sent and before it was recorded | reported as spent by a transaction the home does not record; the tree's outputs are not recovered by the tooling | open | The tree is built and sent inside bcommon's `producer.Trees`, which gives the caller no hook between signing and sending. The coin is spent on the chain, by a tree this home holds no record of | Same |
 
 ### Paying and settling
 
 | Limit | Default | Hard cap | Why | Plane and unicast |
 | --- | --- | --- | --- | --- |
 | Payments one coin can make to one host | one | none | Two unbroadcast payments spending one coin both verify and only one can mine: the host refuses the second (409) | Not on the plane |
-| `bbox history` refused for its session's budget (429) | waits as the host says, 1 to 30 s, and asks once more | one retry | A second refusal ends the command, exit 3; nothing was paid for a refused request | Not on the plane |
+| `bbox history` refused for its session's budget (429) | waits as the host says, 1 to 30 s, and asks once more, while it has paid nothing | one retry | A second refusal ends the command, exit 3. A 429 on the request that carried the payment is not asked again (that would take a second payment): the payment is kept as made, exit 3 | Not on the plane |
+| Payments for one priced question | one | one | The SDK's client pays every 402 again, up to three times; the command refuses a second payment, and a host that asks for one is refused (exit 1) | Not on the plane |
+| A payment that was sent and not answered | kept as made: recorded before it is sent, broadcast from here, its coin never returned to the pool | fixed | The host holds a valid transaction that spends the coin; a coin given back would be spent twice | Not on the plane |
+| What one command pays in all (`-budget`) | 16000 sat | the flag | `history -all` pays one question a page; the pages and prices are the host's, their sum the command's | Not on the plane |
 | Price the client pays for one priced question (`-max-sats`) | 1000 sat | the flag | A price is per question (one page); a host that asks more is asked by the user, never paid by default | Not on the plane: the terms route is HTTP |
 | Payments one `payee settle` has broadcast and not yet mined (`-in-flight`) | 16 | 1 to 64 | All are broadcast before any is waited for, so a run takes about one block; each in flight is a proof poll against the node until its block | Not on the plane |
 | Wait for a payment to mine | 10 min | fixed | Past it the payment is `NOT SETTLED` and tried again next run. A payment whose input is spent elsewhere is refused at once, recorded, and never tried again | Not on the plane |

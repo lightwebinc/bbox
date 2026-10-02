@@ -203,7 +203,14 @@ paid 5 sat to 03d4f2a9c1b7 in 0e8f...4c21, recorded by the host for its payee to
 answered 402 with the price, pays it from your pool (BRC-29, unbroadcast,
 in the `x-bsv-payment` header) and asks again. It never pays more than
 `-max-sats` (1000 by default) for one question, and never pays for a free
-class whatever a host says.
+class whatever a host says. One payment buys one page; `-all` asks every
+page, and `-budget` (16000 sat unless you say otherwise) bounds what they
+add up to.
+
+One question is paid for once. A host that asks for a second payment is
+refused. A payment that was sent is kept as made even when the host does
+not answer: it is recorded in your home before it leaves, and its coin is
+never put back in the pool, where your next payment would spend it twice.
 
 ## 10. Taking an envelope back
 
@@ -220,11 +227,16 @@ funding output, for its life). It is not erasure: whoever already read or
 copied it keeps that copy.
 
 A drop waits for a block. If the sweep could not be settled (the leg was
-unreachable, busy, or gave no verdict) it stays in flight, `doctor` says
-so, and the next `drop` finishes it first. If the network refuses it for
-good (one of its inputs was spent elsewhere, say) it is marked `FAILED`,
-its fee coin goes back to your pool when the node shows it unspent, and the
-next `drop` builds a new sweep: a refused sweep never blocks you.
+unreachable, busy, gave no verdict, or refused it while nothing else spends
+its inputs) it stays in flight, `doctor` says so, and the next `drop`
+finishes it first. Only when the node shows one of its inputs spent by
+another transaction is it marked `FAILED`; its fee coin goes back to your
+pool when the node shows it unspent, and `drop` builds a new sweep at once:
+a failed sweep never blocks you.
+
+An envelope another copy of your home already took back is passed over, and
+its sweep recorded as done. Work an earlier command left unfinished (an
+envelope a host has not taken) does not stop a drop.
 
 ## 11. Plane or unicast
 
@@ -233,7 +245,8 @@ next `drop` builds a new sweep: a refused sweep never blocks you.
 | You submit each object | once, to `facade` | to every host in `hosts` |
 | Other hosts receive it | from the plane, which repairs loss | only from you, or from whoever copies it across (`list -fill`) |
 | A host that was down | receives what it missed from the plane | misses it until someone submits it again |
-| Sweeps | to the facade and directly to every other host named | to every host named; all must take it |
+| An envelope or a receipt counts as published | once `quorum` of the hosts named answer it by lookup (name them in `hosts`) | once `quorum` hosts took it |
+| Sweeps | to the facade and directly to every other host named; all must answer it | to every host named; all must take it |
 | Settings | `facade`, and `hosts` for reading | `mode = unicast`, `hosts`, `quorum` |
 
 On the plane a host off it learns of a sweep only because the client also
@@ -275,6 +288,7 @@ the caps are where a setting stops making sense. The ones you meet first:
 | Send rate | 1 a second | 20 a second |
 | Hosts | none | 16; unicast warns above 5 |
 | Price paid for one question | at most 1000 sat | `-max-sats` |
+| Paid by one command in all | at most 16000 sat | `-budget` |
 | Payments settled at once | 16 | 64 |
 
 The full table, with the reasons and the measurements behind them, is
@@ -289,9 +303,9 @@ every endpoint answers.
 | Exit | Meaning | What to do |
 | --- | --- | --- |
 | 0 | done; everything asked verified and the hosts agree | nothing |
-| 1 | refused: a host answered something that does not verify (not shown), a message or payment your checks refuse, or the network refused a sweep or a payment | read the message: it names the host or the reason. A refused sweep is marked failed; drop again |
-| 2 | usage, configuration, transport, a quorum not met, or a price over `-max-sats` | fix the named setting; what was persisted is published by the next command |
-| 3 | incomplete: hosts disagree, a host could not be asked, or no host answers what you named | `list -fill` copies across what one host lacks; a host that is down answers later |
+| 1 | refused: a host answered something that does not verify (not shown), a message or payment your checks refuse, the network refused a sweep or a payment, or a host asked to be paid twice for one question | read the message: it names the host or the reason. A refused sweep is marked failed; drop again |
+| 2 | usage, configuration, transport, a quorum not met, a price over `-max-sats` or `-budget`, or a sweep a leg refused that may still mine | fix the named setting; what was persisted is sent or published by the next command |
+| 3 | incomplete: hosts disagree, a host could not be asked, no host answers what you named, or a budget ran out before the history was read to its end | `list -fill` copies across what one host lacks; a host that is down answers later |
 
 Common messages:
 
@@ -301,6 +315,14 @@ Common messages:
   drop` again finishes it.
 - `host ...: DISAGREES`: one host lacks an envelope another has; `bbox list
   -fill`.
+- `1 of 2 host(s) named answer it and 2 must`: on the plane, a host named
+  does not hold what you sent. It is kept, and the next command publishes
+  it first; a lower `quorum` counts it published with fewer hosts.
+- `it is kept as made and its coins are not reused`: a payment for a
+  priced question was sent and the host did not answer. Ask again later;
+  the next payment spends another coin.
+- `the history is not read to its end`: `history -all` reached its
+  `-budget`. Give it a larger one, or go on with the `-after` it names.
 - `NOT SETTLED` from `payee settle`: the payment did not mine in time; the
   next run tries again.
 
