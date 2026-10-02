@@ -75,7 +75,8 @@ interface RcptEntry {
 /** A sweep tombstone the host holds. */
 interface SweepEntry {
   txid: string
-  office: string
+  /** Every office the sweep was admitted in: one mined sweep may be published to several topics. */
+  offices: Set<string>
   spent: string[]
   height: number
 }
@@ -152,6 +153,8 @@ export class BboxLookupService implements LookupService {
   private readonly ackers = new Map<string, Set<string>>()
   /** Sweep txid -> first sight. */
   private readonly sweepSeen = new Map<string, number>()
+  /** Sweep txid -> the offices it was admitted in, as the journal's `s` lines name them. */
+  private readonly sweepOffices = new Map<string, Set<string>>()
 
   // What the host holds, from storage.
   private readonly envelopes = new Map<string, EnvEntry>()
@@ -164,6 +167,9 @@ export class BboxLookupService implements LookupService {
   /** Outputs dropped from the index and still to be deleted from storage. */
   private readonly pending = new Map<string, { txid: string; topic: string }>()
   private storage: Storage | undefined
+  /** The restore in flight: an admission waits for it. */
+  private inflight: Promise<number> | undefined
+  private warnedNoDelete = false
 
   // Memo of the status functions, cleared on any change.
   private winners = new Map<string, string>()
@@ -196,6 +202,10 @@ export class BboxLookupService implements LookupService {
   get rowCount(): number {
     return this.rows.size
   }
+  /** Carriers ever admitted: one journal line, and one entry in memory, each, for the host's life. */
+  get lineCount(): number {
+    return this.lines.size
+  }
   get pendingDeletes(): number {
     return this.pending.size
   }
@@ -220,8 +230,14 @@ export class BboxLookupService implements LookupService {
     } else {
       r.sweeps.add(l.s)
       if (!this.sweepSeen.has(l.s)) this.sweepSeen.set(l.s, l.at)
+      addTo(this.sweepOffices, l.s, l.office)
     }
     this.changed()
+  }
+
+  private queueDelete(txid: string, office: string): void {
+    const t = topic(office)
+    this.pending.set(`${t}|${txid}`, { txid, topic: t })
   }
 
   private write(l: Line): void {
@@ -307,7 +323,13 @@ export class BboxLookupService implements LookupService {
 
   // ---- admission
 
-  outputAdmittedByTopic(payload: OutputAdmittedByTopic): void {
+  /**
+   * Indexes an admitted output. The index is changed before the first
+   * await; what follows deletes what was dropped from storage. An admission
+   * that meets a restore in flight waits for it, so that it is decided as
+   * any other.
+   */
+  async outputAdmittedByTopic(payload: OutputAdmittedByTopic): Promise<void> {
     if (payload.mode !== 'whole-tx') return
     const office = this.officeOf(payload.topic)
     if (office === undefined) return
@@ -318,7 +340,9 @@ export class BboxLookupService implements LookupService {
       this.host.log('ls_bbox ignored an admission whose BEEF did not parse', { topic: payload.topic })
       return
     }
+    while (this.inflight !== undefined) await this.inflight.catch(() => {})
     this.index(office, tx, payload.outputIndex)
+    await this.flush()
   }
 
   outputEvicted(txid: string, outputIndex: number): void {
@@ -326,7 +350,8 @@ export class BboxLookupService implements LookupService {
   }
 
   outputNoLongerRetainedInHistory(txid: string, outputIndex: number, t: string): void {
-    if (outputIndex === 0 && this.officeOf(t) !== undefined) this.forget(txid)
+    const office = this.officeOf(t)
+    if (outputIndex === 0 && office !== undefined) this.forget(txid, office)
   }
 
   private officeOf(t: string): string | undefined {
@@ -370,7 +395,7 @@ export class BboxLookupService implements LookupService {
       }
       if (!this.lines.has(c)) this.write(line)
       if (this.rows.get(op)!.dropped.has(c)) {
-        this.pending.set(txid, { txid, topic: topic(office) })
+        this.queueDelete(txid, office)
         return false
       }
       if (entry.e !== undefined) {
@@ -389,6 +414,7 @@ export class BboxLookupService implements LookupService {
       return false
     }
     // A sweep, or a published funding tree: every input's outpoint is swept.
+    const height = tx.merklePath?.blockHeight ?? 0
     const spent: string[] = []
     for (const input of tx.inputs) {
       const src = input.sourceTXID ?? input.sourceTransaction?.id('hex')
@@ -396,31 +422,44 @@ export class BboxLookupService implements LookupService {
       const op = outpoint(src, input.sourceOutputIndex)
       spent.push(op)
       if (!this.rows.get(op)?.sweeps.has(txid)) {
-        this.write({ k: 's', op, s: txid, office, h: tx.merklePath?.blockHeight ?? 0, at: this.sweepSeen.get(txid) ?? now })
+        this.write({ k: 's', op, s: txid, office, h: height, at: this.sweepSeen.get(txid) ?? now })
         this.host.metrics.inc('bbox_retractions_total')
       }
     }
-    this.sweeps.set(txid, { txid, office, spent, height: tx.merklePath?.blockHeight ?? 0 })
-    for (const op of spent) addTo(this.sweepsByOp, `${office}|${op}`, txid)
+    // The same mined sweep admitted in another office answers there too, and
+    // the journal names it there (one more line of the kind it always held),
+    // so a restore reads it back in that office once its tombstone is spent.
+    if (spent.length > 0 && this.sweepOffices.get(txid)?.has(office) !== true) {
+      this.write({ k: 's', op: spent[0]!, s: txid, office, h: height, at: this.sweepSeen.get(txid) ?? now })
+    }
+    let e = this.sweeps.get(txid)
+    if (e === undefined) this.sweeps.set(txid, (e = { txid, offices: new Set(), spent, height }))
+    if (!e.offices.has(office)) {
+      e.offices.add(office)
+      for (const op of e.spent) addTo(this.sweepsByOp, `${office}|${op}`, txid)
+    }
     return true
   }
 
-  /** Removes a held output from the index; its rows stay. */
-  private forget(txid: string): void {
+  /** Removes a held output from the index, in one office or in all; its rows stay. */
+  private forget(txid: string, office?: string): void {
     const e = this.envelopes.get(txid)
-    if (e !== undefined) {
+    if (e !== undefined && (office === undefined || e.office === office)) {
       this.envelopes.delete(txid)
       removeFrom(this.envByTo, `${e.office}|${e.to}`, txid)
     }
     const r = this.receipts.get(txid)
-    if (r !== undefined) {
+    if (r !== undefined && (office === undefined || r.office === office)) {
       this.receipts.delete(txid)
       removeFrom(this.rcptByBy, `${r.office}|${r.by}`, txid)
     }
     const s = this.sweeps.get(txid)
     if (s !== undefined) {
-      this.sweeps.delete(txid)
-      for (const op of s.spent) removeFrom(this.sweepsByOp, `${s.office}|${op}`, txid)
+      for (const o of office === undefined ? [...s.offices] : [office]) {
+        if (!s.offices.delete(o)) continue
+        for (const op of s.spent) removeFrom(this.sweepsByOp, `${o}|${op}`, txid)
+      }
+      if (s.offices.size === 0) this.sweeps.delete(txid)
     }
   }
 
@@ -437,7 +476,7 @@ export class BboxLookupService implements LookupService {
     if (r.dropped.has(c)) return
     this.write({ k: 'd', op: l.op, c, w: this.winnerOf(l.op) === c })
     this.forget(l.txid)
-    this.pending.set(l.txid, { txid: l.txid, topic: topic(l.office) })
+    this.queueDelete(l.txid, l.office)
     this.host.metrics.inc('bbox_dropped_total', { why })
     this.host.log('ls_bbox dropped a carrier', { txid: l.txid, outpoint: l.op, why })
   }
@@ -480,8 +519,8 @@ export class BboxLookupService implements LookupService {
     }
     for (const s of [...this.sweeps.values()]) {
       if (old(this.sweepSeen.get(s.txid))) {
+        for (const o of s.offices) this.queueDelete(s.txid, o)
         this.forget(s.txid)
-        this.pending.set(s.txid, { txid: s.txid, topic: topic(s.office) })
         this.host.metrics.inc('bbox_dropped_total', { why: 'retention' })
         n++
       }
@@ -490,10 +529,20 @@ export class BboxLookupService implements LookupService {
     return n
   }
 
-  /** Deletes dropped outputs from storage, when the host's storage can. */
+  /**
+   * Deletes dropped outputs from storage. It runs after every admission and
+   * after retention, so a dropped output is gone at once. A store that
+   * cannot delete keeps what was dropped; the queue is not kept for it.
+   */
   async flush(): Promise<void> {
-    const del = this.storage?.deleteOutput?.bind(this.storage)
-    if (del === undefined) return
+    if (this.storage === undefined || this.pending.size === 0) return
+    const del = this.storage.deleteOutput?.bind(this.storage)
+    if (del === undefined) {
+      if (!this.warnedNoDelete) this.host.log('ls_bbox cannot delete dropped outputs: the storage has no deleteOutput', {})
+      this.warnedNoDelete = true
+      this.pending.clear()
+      return
+    }
     for (const [k, p] of [...this.pending]) {
       try {
         await del(p.txid, 0, p.topic)
@@ -623,7 +672,18 @@ export class BboxLookupService implements LookupService {
    * envelopes.
    */
   async restore(outputs: Output[], storage: RestoreStorage): Promise<number> {
-    for (const m of [this.rows, this.lines, this.ackers, this.sweepSeen, this.envelopes, this.envByTo, this.receipts, this.rcptByBy, this.sweeps, this.sweepsByOp, this.pending]) {
+    while (this.inflight !== undefined) await this.inflight.catch(() => {})
+    // Marked in flight before any of it runs, so nothing is admitted into a half-cleared index.
+    this.inflight = Promise.resolve().then(async () => await this.restoreAll(outputs, storage))
+    try {
+      return await this.inflight
+    } finally {
+      this.inflight = undefined
+    }
+  }
+
+  private async restoreAll(outputs: Output[], storage: RestoreStorage): Promise<number> {
+    for (const m of [this.rows, this.lines, this.ackers, this.sweepSeen, this.sweepOffices, this.envelopes, this.envByTo, this.receipts, this.rcptByBy, this.sweeps, this.sweepsByOp, this.pending]) {
       m.clear()
     }
     for (const l of this.journal.load()) this.apply(l)
@@ -638,9 +698,7 @@ export class BboxLookupService implements LookupService {
     }
     const named: Array<{ topic: string; txid: string }> = []
     for (const l of this.lines.values()) if (this.offices.has(l.office)) named.push({ topic: topic(l.office), txid: l.txid })
-    const sweepOffice = new Map<string, string>()
-    for (const l of this.journal.load()) if (l.k === 's') sweepOffice.set(l.s, l.office)
-    for (const [txid, office] of sweepOffice) if (this.offices.has(office)) named.push({ topic: topic(office), txid })
+    for (const [txid, offices] of this.sweepOffices) for (const office of offices) if (this.offices.has(office)) named.push({ topic: topic(office), txid })
     let indexed = 0
     const take = async (o: Output): Promise<void> => {
       let row: Output | null = o
