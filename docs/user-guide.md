@@ -127,6 +127,13 @@ your home before it is published: if the command stops part way, `doctor`
 names it and the next `send`, `ack` or `drop` publishes the same bytes
 first. A second carrier is never made on the same funding output.
 
+The same holds for a funding tree. If a command stops while it is minting
+one, the next `send`, `ack` or `drop` asks the node what became of it and
+tells you: `funding tree ... is recovered` when the tree reached the chain
+(nothing is lost), or `... never reached the chain: its fee coin ... is
+unspent and back in the pool` when it did not. You have nothing to do; if
+the node cannot be asked, the command says so and the next one asks again.
+
 ## 7. Reading and acknowledging
 
 ```console

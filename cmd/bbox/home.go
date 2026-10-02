@@ -621,6 +621,9 @@ func cmdDoctor(ctx context.Context, g *global, args []string) error {
 			} else {
 				fmt.Fprintln(out, "tree        none yet (the first send mints one)")
 			}
+			for _, p := range st.UnsettledTrees() {
+				fmt.Fprintf(out, "tree        %s signed for coin %s and not recorded as minted; the next send, ack or drop asks the node what became of it\n", p.Tree.Txid, p.Coin.Outpoint())
+			}
 			fmt.Fprintf(out, "sent        %d envelope(s), %d receipt(s), %d sweep(s)\n", len(st.Sent), len(st.Receipts), len(st.Sweeps))
 			for _, p := range st.Outbox {
 				fmt.Fprintf(out, "outbox      %s %s persisted and not confirmed published; the next send, ack or drop publishes it\n", p.Kind, p.Txid)

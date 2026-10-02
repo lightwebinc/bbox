@@ -63,3 +63,83 @@ func TestTheJournalRecordsThePoolWhileACommandRuns(t *testing.T) {
 		t.Fatalf("the journal after the command: %v %+v", err, again.Taking)
 	}
 }
+
+// Adopting a tree drops its record as a tree signed and not yet adopted,
+// in the save that records it as adopted, and leaves every other record.
+func TestAdoptDropsTheTreesRecord(t *testing.T) {
+	dir := t.TempDir()
+	w, err := bwallet.Create(dir, Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := w.Signer().IdentityHex()
+	st, err := state.Load(dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{St: st, Signer: w.Signer()}
+	one := funding.Tree{IdentityKeyHex: id, Txid: strings.Repeat("22", 32), Count: 8}
+	two := funding.Tree{IdentityKeyHex: id, Txid: strings.Repeat("33", 32), Count: 8}
+	coin := bwallet.Output{TxID: strings.Repeat("11", 32), Vout: 1, Satoshis: 5}
+	// The record is on disk before the hook returns.
+	if err := e.prepareTree(one, coin); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.prepareTree(two, coin); err != nil {
+		t.Fatal(err)
+	}
+	if saved, err := state.Load(dir, id); err != nil || len(saved.PendingTrees) != 2 || saved.PendingTrees[0].Coin.Outpoint() != coin.Outpoint() {
+		t.Fatalf("the records the hook saved: %v %+v", err, saved)
+	}
+	if err := (treeState{e}).Adopt(one); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := state.Load(dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Tree == nil || saved.Tree.Txid != one.Txid || len(saved.PendingTrees) != 1 || saved.PendingTrees[0].Tree.Txid != two.Txid {
+		t.Fatalf("after adopting one: tree %+v, records %+v", saved.Tree, saved.PendingTrees)
+	}
+}
+
+// A record that cannot be saved aborts the mint, and is not kept in memory.
+func TestARecordThatCannotBeSavedAbortsTheMint(t *testing.T) {
+	w, err := bwallet.Create(t.TempDir(), Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := state.Load(filepath.Join(t.TempDir(), "gone"), w.Signer().IdentityHex())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{St: st, Signer: w.Signer()}
+	if err := e.prepareTree(funding.Tree{Txid: strings.Repeat("22", 32)}, bwallet.Output{}); err == nil || len(st.PendingTrees) != 0 {
+		t.Fatalf("a record that could not be saved: %v %+v", err, st.PendingTrees)
+	}
+}
+
+// A spent coin is taken out of the pool, and every other coin stays.
+func TestRemoveCoin(t *testing.T) {
+	w, err := bwallet.Create(t.TempDir(), Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := bwallet.Output{TxID: strings.Repeat("11", 32), Vout: 0, Satoshis: 5, Height: 3}
+	b := bwallet.Output{TxID: strings.Repeat("11", 32), Vout: 1, Satoshis: 5, Unproven: true}
+	c := bwallet.Output{TxID: strings.Repeat("22", 32), Vout: 0, Satoshis: 5, Height: 9, Coinbase: true}
+	d := bwallet.Output{TxID: strings.Repeat("33", 32), Vout: 0, Satoshis: 5, Unproven: true}
+	if _, err := w.Pool.Add(a, b, c, d); err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []bwallet.Output{b, a} {
+		if !RemoveCoin(w.Pool, gone) || RemoveCoin(w.Pool, gone) {
+			t.Fatalf("removing %s", gone.Outpoint())
+		}
+	}
+	left := w.Pool.Outputs()
+	if len(left) != 2 || left[0].Outpoint() != d.Outpoint() && left[1].Outpoint() != d.Outpoint() ||
+		left[0].Outpoint() != c.Outpoint() && left[1].Outpoint() != c.Outpoint() {
+		t.Fatalf("the pool after: %+v", left)
+	}
+}

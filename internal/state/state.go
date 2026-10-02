@@ -1,7 +1,8 @@
 // Package state is an identity's durable record in its home: the funding
-// trees its carriers spend, the carriers persisted before they are
-// published, what it sent and acknowledged, the sweeps it built, the
-// envelopes it read and the payments it took.
+// trees its carriers spend, the trees signed and not yet adopted, the
+// carriers persisted before they are published, what it sent and
+// acknowledged, the sweeps it built, the envelopes it read and the payments
+// it took.
 //
 // It is written before anything leaves the machine. A carrier is persisted
 // with the funding output it spends marked used before it is submitted, so
@@ -52,6 +53,13 @@ type State struct {
 	Tree  *funding.Tree  `json:"tree,omitempty"`
 	Trees []funding.Tree `json:"trees,omitempty"`
 	Ahead []funding.Tree `json:"ahead,omitempty"`
+	// PendingTrees are the funding trees signed for a pool coin that the
+	// home has not adopted yet, each with the coin it spends: the record
+	// made before a tree reaches the settlement leg, so a run that stops
+	// before the tree is adopted leaves what the next command needs to ask
+	// the node what became of it. Adopting a tree drops its record in the
+	// same save.
+	PendingTrees []PendingTree `json:"pendingTrees,omitempty"`
 
 	// Outbox holds every object persisted and not yet confirmed
 	// published, oldest first. A command that finds one publishes the
@@ -98,6 +106,71 @@ type State struct {
 // OnSave sets what runs before every Save: a publisher records the pool
 // with it. Nil clears it.
 func (s *State) OnSave(f func()) { s.beforeSave = f }
+
+// PendingTree is a funding tree signed for a pool coin and not yet
+// adopted, keyed by the tree's txid.
+type PendingTree struct {
+	// Tree is the record the tree is adopted as, without a proof.
+	Tree funding.Tree `json:"tree"`
+	// Coin is the fee coin the tree spends, as the pool held it.
+	Coin bwallet.Output `json:"coin"`
+	// ReturnedOnce is set when a command found the tree absent from the
+	// node and the coin unspent, and put the coin back: the record is kept
+	// for one more command, in case the tree reaches the node after all.
+	ReturnedOnce bool `json:"returned_once,omitempty"`
+}
+
+// KeepPendingTree records p, replacing a record of the same tree.
+func (s *State) KeepPendingTree(p PendingTree) {
+	for i := range s.PendingTrees {
+		if s.PendingTrees[i].Tree.Txid == p.Tree.Txid {
+			s.PendingTrees[i] = p
+			return
+		}
+	}
+	s.PendingTrees = append(s.PendingTrees, p)
+}
+
+// PendingTreeOf finds the record of the tree txid.
+func (s *State) PendingTreeOf(txid string) *PendingTree {
+	for i := range s.PendingTrees {
+		if s.PendingTrees[i].Tree.Txid == txid {
+			return &s.PendingTrees[i]
+		}
+	}
+	return nil
+}
+
+// DropPendingTree drops the record of the tree txid, and reports whether
+// there was one.
+func (s *State) DropPendingTree(txid string) bool {
+	n := len(s.PendingTrees)
+	s.PendingTrees = slices.DeleteFunc(s.PendingTrees, func(p PendingTree) bool { return p.Tree.Txid == txid })
+	return len(s.PendingTrees) != n
+}
+
+// MintedAhead finds txid among the trees minted ahead and not adopted.
+func (s *State) MintedAhead(txid string) *funding.Tree {
+	for i := range s.Ahead {
+		if s.Ahead[i].Txid == txid {
+			return &s.Ahead[i]
+		}
+	}
+	return nil
+}
+
+// UnsettledTrees are the records of trees the home records nowhere else:
+// those a command has yet to ask the node about. A tree minted ahead and
+// recorded in Ahead keeps its record until it is adopted, and is settled.
+func (s *State) UnsettledTrees() []PendingTree {
+	var out []PendingTree
+	for _, p := range s.PendingTrees {
+		if s.MintedAhead(p.Tree.Txid) == nil {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 // Payment is a payment this identity made for a priced question.
 type Payment struct {

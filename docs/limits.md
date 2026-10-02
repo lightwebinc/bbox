@@ -63,7 +63,9 @@ environment ([host.md](host.md)); a client cannot change it.
 | Limit | Default | Hard cap | Why | Plane and unicast |
 | --- | --- | --- | --- | --- |
 | Coin taken by a run that stopped before it recorded the spend | found by the next command from the pool the state recorded, and put back when the node shows it unspent | none | The pool and the state are two files; the state records the pool before a coin leaves it | Same |
-| Coin taken while a funding tree was minted, when the run stopped after the tree was sent and before it was recorded | reported as spent by a transaction the home does not record; the tree's outputs are not recovered by the tooling | open | The tree is built and sent inside bcommon's `producer.Trees`, which gives the caller no hook between signing and sending. The coin is spent on the chain, by a tree this home holds no record of | Same |
+| Funding tree signed by a run that stopped before it adopted the tree | recorded with its coin before it is sent; the next `send`, `ack` or `drop` asks the node and adopts the tree, or puts the coin back | none | The pool is saved without the coin when the tree is signed, and the tree is adopted only once it is sent, or, minted ahead, at the switch; the record (`pendingTrees`) spans the gap ([usage.md](usage.md)) | Same |
+| Record of a tree the node does not know, whose coin is unspent | kept for one more command after the coin went back, then dropped | fixed | The node's view is a moment's view: a tree handed to the settlement leg an instant before the run stopped can reach the node later. A tree that lands while the record is kept is adopted and its coin taken out of the pool. One that lands after two commands found nothing is not recovered: its outputs are lost to the home, and the transaction that next takes the coin is refused | Same |
+| Funding tree paid through a BRC-100 wallet (bcommon's `Trees.Fund`) | not used: the home pays for its trees from its pool | open | Such a wallet signs and broadcasts inside one call, so nothing can be recorded before the broadcast, and no pool coin exists to put back | Same |
 
 ### Paying and settling
 

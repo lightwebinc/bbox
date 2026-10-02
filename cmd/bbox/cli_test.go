@@ -55,6 +55,9 @@ type harness struct {
 	// transaction a client sends through the node's RPC or arcade, with
 	// that transaction.
 	onSend func(tx *transaction.Transaction)
+	// refuse, when set, is asked for every such transaction; true answers
+	// the client with an error and keeps the transaction from the chain.
+	refuse func(tx *transaction.Transaction) bool
 }
 
 // serveChain is the chain, with the onSend hook in front of it.
@@ -80,11 +83,15 @@ func (h *harness) serveChain(w http.ResponseWriter, r *http.Request) {
 	}
 	if tx != nil {
 		h.mu.Lock()
-		hook := h.onSend
+		hook, refuse := h.onSend, h.refuse
 		h.onSend = nil
 		h.mu.Unlock()
 		if hook != nil {
 			hook(tx)
+		}
+		if refuse != nil && refuse(tx) {
+			http.Error(w, "refused by the test", http.StatusInternalServerError)
+			return
 		}
 	}
 	h.chain.ServeHTTP(w, r)

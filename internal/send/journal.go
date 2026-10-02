@@ -83,7 +83,7 @@ func Reconcile(ctx context.Context, st *state.State, pool *bwallet.Pool, asset *
 }
 
 // recordedSpends are the outpoints spent by every transaction the home
-// records: its funding trees, its sweeps and its payments. A carrier spends
+// records: its funding trees, adopted or not, its sweeps and its payments. A carrier spends
 // a funding output, never a coin.
 func recordedSpends(st *state.State) map[string]bool {
 	out := map[string]bool{}
@@ -112,6 +112,11 @@ func recordedSpends(st *state.State) map[string]bool {
 	}
 	for i := range st.Ahead {
 		raw(st.Ahead[i].RawHex)
+	}
+	// A tree signed and not yet adopted is settled by its own record
+	// (RecoverTrees), which knows the tree to ask the node about.
+	for i := range st.PendingTrees {
+		raw(st.PendingTrees[i].Tree.RawHex)
 	}
 	for i := range st.Sweeps {
 		raw(st.Sweeps[i].RawHex)

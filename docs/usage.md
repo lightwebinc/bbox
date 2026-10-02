@@ -180,9 +180,38 @@ running, the state records the pool as it stood (`taking`); a command that
 ends clears it. The next command after one that stopped in between asks
 the node about a coin in that record that neither file accounts for: one
 the node shows unspent goes back in the pool, one it shows spent is
-reported, and one it cannot answer for is looked at again next time. A
-coin taken while a funding tree was being minted is the exception: see
-[limits.md](limits.md).
+reported, and one it cannot answer for is looked at again next time.
+
+A funding tree has a record of its own. Before a tree reaches the
+settlement leg, the state records it with the coin it spends
+(`pendingTrees`), and the save that records the tree as adopted drops that
+record. A command that stopped in between, while the tree was on its way
+to the chain or, minted ahead, before the command ended, leaves the
+record, and `doctor` names it (`tree ... signed for coin ... and not
+recorded as minted`). The next `send`, `ack` or `drop` asks the node what
+became of the tree before it spends anything, and says what it found:
+
+| The node shows | The command does | It says |
+| --- | --- | --- |
+| the tree, and the current tree is used up or there is none | adopts the tree and takes its unspent change into the pool | `funding tree ... is recovered` |
+| the tree, and the current tree still has outputs | holds the tree as the one minted ahead, takes its change, and adopts it when the current tree runs out; the record stays until then | `funding tree ... is recovered and waits for the switch` |
+| no such tree, and the coin unspent | puts the coin back in the pool and keeps the record for one more command; the second such answer drops it | `... never reached the chain: its fee coin ... is unspent and back in the pool`, then `its record is kept for one more command` |
+| no such tree, and the coin spent by another transaction | drops the record | `... never reached the chain: its fee coin ... is spent by ...` |
+| nothing: it cannot be asked, or cannot say | keeps the record and goes on; the next command asks again | `... could not be settled now (...): its record is kept and the next command asks again` |
+
+A tree that reaches the node after its coin went back is found by the next
+command, which adopts it and takes the coin, now spent, out of the pool
+(`coin ... is spent on the chain and is taken out of the pool`). A command
+that only reads (`list`, `history`, `doctor`, and `read` when it
+acknowledges nothing) asks nothing about a tree and needs no node for it.
+What is left open is in [limits.md](limits.md).
+
+The home pays for its trees from its own pool. A deployment that funded
+trees through a BRC-100 wallet instead (bcommon's `Trees.Fund`) would not
+be covered by any of this: such a wallet chooses the coins, signs and
+broadcasts inside one call, so there is no moment before the broadcast to
+record the tree in, and a run that stopped after the broadcast and before
+the tree was adopted would leave a tree only that wallet knows.
 
 The proof a home keeps of a funding tree is the one the node gave when it
 mined. When `header_url` is set, the kept proof is checked against it
