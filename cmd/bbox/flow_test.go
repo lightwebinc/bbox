@@ -137,6 +137,47 @@ func TestHistoryPaysThe402(t *testing.T) {
 	h.want(h.run("other", "", "payee", "settle", ledger), exitRefused, "does not pay the key this identity derives")
 }
 
+// A host gives each session a budget of signed responses and refuses a
+// request over it 429 without a signature. The command waits as the host
+// says and asks once more; what it made for the refused request is
+// refunded, so one answer is one payment; refused twice, it says so.
+func TestHistoryWaitsOutALimitedSession(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.identity("payee")
+	h.newOffice("bob")
+	h.startPaid(t, "payee", 7)
+	tx := h.send("alice", bob, "read me later")
+	h.must("bob", "", "read", tx)
+	h.must("bob", "", "ack", tx)
+	// The question is refused: asked again, it is answered 402, paid and answered.
+	h.paid.Limit(1)
+	r := h.must("bob", "", "history")
+	if !strings.Contains(r.stdout, "paid 7 sat") || !strings.Contains(r.stdout, tx) || !strings.Contains(r.stderr, "waiting 1s and asking once more") || len(h.paid.Payments) != 1 {
+		t.Fatalf("history, the question limited: %d payments\n%s\n%s", len(h.paid.Payments), r.stdout, r.stderr)
+	}
+	// The paid request is refused: its payment was never taken, and the second is the one kept.
+	h.paid.Limit(2)
+	r = h.must("bob", "", "history")
+	if !strings.Contains(r.stdout, "paid 7 sat") || !strings.Contains(r.stderr, "waiting 1s and asking once more") || len(h.paid.Payments) != 2 {
+		t.Fatalf("history, the payment limited: %d payments\n%s\n%s", len(h.paid.Payments), r.stdout, r.stderr)
+	}
+	if !strings.Contains(r.stdout, h.paid.Payments[1].Txid) {
+		t.Fatalf("the payment kept is not the one the host took:\n%s", r.stdout)
+	}
+	// Refused twice: the command stops, and nothing was paid.
+	h.paid.Limit(1, 2)
+	h.want(h.run("bob", "", "history"), exitIncomplete, "(429) twice; ask again later")
+	if len(h.paid.Payments) != 2 {
+		t.Fatalf("payments %d", len(h.paid.Payments))
+	}
+	// And the wallet still pays: nothing it made for a refused request is stranded.
+	h.paid.Limit()
+	h.must("bob", "", "history")
+}
+
 func TestDropRetractsAtEveryHost(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

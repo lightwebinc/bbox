@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -38,12 +39,29 @@ type Paid struct {
 	// and the Atomic BEEF, as a host's payment ledger records them.
 	Payments []Payment
 
+	// limited are the authenticated requests, by their count, it refuses
+	// 429 without a signature (Limit).
+	limited []int
+	asked   int
+
 	mu     sync.Mutex
 	wallet *wallet.ProtoWallet
 	peer   *auth.Peer
 	tr     *serverTransport
 	issued map[string]bool
 	used   map[string]bool
+}
+
+// Limit makes it refuse the nth authenticated requests from now, counted
+// from 1, with 429 and no signature, as a host does for a session over its
+// budget of signed responses.
+func (p *Paid) Limit(nth ...int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.limited = nil
+	for _, n := range nth {
+		p.limited = append(p.limited, p.asked+n)
+	}
 }
 
 // Payment is one accepted payment, in the host ledger's shape.
@@ -210,6 +228,12 @@ func (p *Paid) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Nonce: r.Header.Get(brc104.HeaderNonce), YourNonce: r.Header.Get(brc104.HeaderYourNonce), Signature: sig, Payload: payload}
 	if err := p.tr.onData(ctx, m); err != nil {
 		http.Error(w, "the request does not verify", http.StatusUnauthorized)
+		return
+	}
+	p.asked++
+	if slices.Contains(p.limited, p.asked) {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "too many requests on this session", http.StatusTooManyRequests)
 		return
 	}
 	res := p.route(r, body, id)

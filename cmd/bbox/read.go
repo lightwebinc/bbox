@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	clients "github.com/bsv-blockchain/go-sdk/auth/clients/authhttp"
@@ -537,6 +538,75 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 	return nil
 }
 
+// limitWatch is the HTTP transport of a history question. A host gives
+// each BRC-104 session a budget of signed responses and refuses a request
+// over it 429 without a signature, which the SDK's client reports only as a
+// failed authentication; the transport sees the status and the wait the
+// host named.
+type limitWatch struct {
+	next http.RoundTripper
+	mu   sync.Mutex
+	hit  bool
+	wait time.Duration
+}
+
+// The wait a host names is taken, within these bounds.
+const (
+	minLimitWait = time.Second
+	maxLimitWait = 30 * time.Second
+)
+
+func (w *limitWatch) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := w.next.RoundTrip(r)
+	if err != nil || resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("x-bsv-auth-version") != "" || strings.HasSuffix(r.URL.Path, "/.well-known/auth") {
+		return resp, err
+	}
+	wait := minLimitWait
+	if s, perr := strconv.Atoi(resp.Header.Get("Retry-After")); perr == nil && s > 0 {
+		wait = min(time.Duration(s)*time.Second, maxLimitWait)
+	}
+	w.mu.Lock()
+	w.hit, w.wait = true, wait
+	w.mu.Unlock()
+	return resp, err
+}
+
+// taken reports a refusal seen since the last call, and the wait named.
+func (w *limitWatch) taken() (time.Duration, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	hit := w.hit
+	w.hit = false
+	return w.wait, hit
+}
+
+// errLimited is a request refused for its session's budget twice.
+var errLimited = errors.New("the host limits how fast one session is answered")
+
+// askLimited asks through af and, when the host refused the request for
+// its session's budget, waits as the host said and asks once more. Nothing
+// was signed and no payment was taken by a refused request, so what the
+// purse made for it is refunded before the second.
+func (g *global) askLimited(ctx context.Context, p *purse.Purse, watch *limitWatch, ask func() (*http.Response, error)) (*http.Response, error) {
+	resp, err := ask()
+	wait, limited := watch.taken()
+	if err == nil || !limited {
+		return resp, err
+	}
+	p.Refund()
+	g.say("the host limits how fast one session is answered; waiting %s and asking once more", wait)
+	select {
+	case <-time.After(wait):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	resp, err = ask()
+	if _, again := watch.taken(); err != nil && again {
+		return nil, errLimited
+	}
+	return resp, err
+}
+
 const historyHelp = `usage: bbox history [-at URL] [-after CURSOR] [-max-sats N] [-office OFFICE]
 
 Ask a host the priced history question (spec section 7.3): the envelopes
@@ -599,11 +669,17 @@ func cmdHistory(ctx context.Context, g *global, args []string) error {
 		q["after"] = *after
 	}
 	body, _ := json.Marshal(lookup.Question{Service: boxrec.LookupService, Query: q})
-	af := clients.New(p, clients.WithoutLogging(), clients.WithHttpClient(&http.Client{Timeout: g.cfg.Timeout}))
-	resp, err := af.Fetch(ctx, strings.TrimRight(base, "/")+"/lookup", &clients.SimplifiedFetchRequestOptions{
-		Method: http.MethodPost, Headers: map[string]string{"content-type": "application/json"}, Body: body})
+	watch := &limitWatch{next: http.DefaultTransport}
+	af := clients.New(p, clients.WithoutLogging(), clients.WithHttpClient(&http.Client{Timeout: g.cfg.Timeout, Transport: watch}))
+	resp, err := g.askLimited(ctx, p, watch, func() (*http.Response, error) {
+		return af.Fetch(ctx, strings.TrimRight(base, "/")+"/lookup", &clients.SimplifiedFetchRequestOptions{
+			Method: http.MethodPost, Headers: map[string]string{"content-type": "application/json"}, Body: body})
+	})
 	if err != nil {
 		p.Refund()
+		if errors.Is(err, errLimited) {
+			return incomplete("history at %s: %v (429) twice; ask again later", base, err)
+		}
 		return fmt.Errorf("history at %s: %w", base, payWords(err, *maxSats))
 	}
 	defer resp.Body.Close()
