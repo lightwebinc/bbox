@@ -416,6 +416,17 @@ func (l *Listing) Refusals() []Refusal {
 	return out
 }
 
+// Refused reports whether a host answered an output with subject txid that
+// did not verify.
+func (l *Listing) Refused(txid string) bool {
+	for _, r := range l.Refusals() {
+		if r.Txid == txid {
+			return true
+		}
+	}
+	return false
+}
+
 // Find returns the item with txid, if a host answered it.
 func (l *Listing) Find(txid string) *Item {
 	for _, it := range l.Items {

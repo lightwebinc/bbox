@@ -149,7 +149,8 @@ Every host in `hosts` is asked; every envelope is checked (the host's own
 admission rules, the signatures, SPV of its funding tree against your
 `header_url`, the office, that it is to you) before it is shown. A host
 that answers something that does not verify is named and nothing it
-answered is shown (exit 1). Hosts that answer different sets are reported
+answered is shown (exit 3): what you see comes from the hosts whose
+answers verify. Hosts that answer different sets are reported
 host by host (exit 3); the union is shown, never merged silently.
 
 **A host that lacks an envelope** another host has (it was off the plane,
@@ -310,9 +311,9 @@ every endpoint answers.
 | Exit | Meaning | What to do |
 | --- | --- | --- |
 | 0 | done; everything asked verified and the hosts agree | nothing |
-| 1 | refused: a host answered something that does not verify (not shown), a message or payment your checks refuse, the network refused a sweep or a payment, or a host asked to be paid twice for one question | read the message: it names the host or the reason. A refused sweep is marked failed; drop again |
+| 1 | refused: a message or payment your checks refuse, a paid history page holding what does not verify, the network refused a sweep or a payment, or a host asked to be paid twice for one question | read the message: it names the host or the reason. A refused sweep is marked failed; drop again |
 | 2 | usage, configuration, transport, a quorum not met, a price over `-max-sats` or `-budget`, or a sweep a leg refused that may still mine | fix the named setting; what was persisted is sent or published by the next command |
-| 3 | incomplete: hosts disagree, a host could not be asked, no host answers what you named, or a budget ran out before the history was read to its end | `list -fill` copies across what one host lacks; a host that is down answers later |
+| 3 | incomplete: hosts disagree, a host answered something that does not verify (named, not shown), a host could not be asked, no host answers what you named, or a budget ran out before the history was read to its end | `list -fill` copies across what one host lacks; a host that is down answers later |
 
 Common messages:
 
@@ -324,6 +325,13 @@ Common messages:
   drop` again finishes it.
 - `host ...: DISAGREES`: one host lacks an envelope another has; `bbox list
   -fill`.
+- `host ...: REFUSED`: a host answered something that does not verify (bytes
+  changed on the way, or by the host). It is not shown; what you see comes
+  from the other hosts. Look at the named host.
+- `none verifies against the header source`: every envelope the hosts
+  answered was refused. Check `header_url` (`bbox doctor`) before blaming
+  the hosts; after a reorganisation set `asset` so stale proofs are
+  replaced.
 - `1 of 2 host(s) named answer it and 2 must`: on the plane, a host named
   does not hold what you sent. It is kept, and the next command publishes
   it first; a lower `quorum` counts it published with fewer hosts.

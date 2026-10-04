@@ -126,8 +126,10 @@ func (g *global) resolve(f viewFlags, me []byte) (view, error) {
 
 // listing asks every host the view's question and reports what they
 // answered, refused or lacked. Its error is nil when every host answered
-// the same verified set, exit 1 when a host answered something that does
-// not verify, exit 3 when hosts disagree or one could not be asked.
+// the same verified set, and exit 3 when a host answered something that
+// does not verify (named, and not shown), the hosts disagree, or one could
+// not be asked: what is shown comes from what verified, and one host at
+// fault does not make a check fail.
 func (g *global) listing(ctx context.Context, rd *reader.Client, v view) (*reader.Listing, error) {
 	l, err := rd.List(ctx, v.query(), v.to)
 	if err != nil {
@@ -146,9 +148,15 @@ func (g *global) listing(ctx context.Context, rd *reader.Client, v view) (*reade
 	if l.Answered() == 0 {
 		return l, usage("no host answered")
 	}
-	for _, r := range l.Refusals() {
-		g.say("host %s: REFUSED %s (%s): %v", r.Host, r.Txid, r.Reason, r.Err)
-		problem = refused("a host answered what does not verify; it is not shown")
+	refusals := l.Refusals()
+	for _, r := range refusals {
+		g.say("host %s: REFUSED %s (%s): what this host answered does not verify, so it is not shown: %v", r.Host, r.Txid, r.Reason, r.Err)
+		problem = incomplete("a host answered what does not verify; it is not shown")
+	}
+	if len(refusals) > 0 && len(l.Items) == 0 {
+		// The hosts answered, and nothing they answered holds against this
+		// home's headers: as likely the header source as the hosts.
+		problem = incomplete("the hosts answered %d envelope(s) and none verifies against the header source %s: nothing is shown. A header source that does not answer fails every answer the same way (bbox doctor), and a proof a reorganisation displaced is replaced only from a node (config key asset)", len(refusals), g.cfg.HeaderURL)
 	}
 	for host, txids := range l.Missing() {
 		g.say("host %s: DISAGREES: it does not answer %d envelope(s) another host answered: %s", host, len(txids), strings.Join(txids, ", "))
@@ -175,7 +183,9 @@ List the open envelopes to this identity (or -to) in the office: the inbox
 asked, page after page; every envelope is checked against the headers and
 the host's own rules before it is printed, and the hosts' answers are
 compared: a host that withholds an envelope another answered is reported,
-never merged silently (exit 3). One line per envelope: created, txid,
+never merged silently (exit 3), and a host that answers what does not
+verify is named and what it answered is not shown (exit 3). One line per
+envelope: created, txid,
 sender, box, size, and the hosts that answered it.
 
 -fill copies each envelope a host lacks across to it (spec section 9): the
@@ -314,6 +324,9 @@ func cmdRead(ctx context.Context, g *global, args []string) error {
 		items = nil
 		for _, id := range pos {
 			it := l.Find(id)
+			if it == nil && l.Refused(id) {
+				return incomplete("%s: the hosts answered it, each answer named above, and none verifies against the header source %s: nothing is shown, and it is not absent. Ask other hosts, or check the header source (bbox doctor)", id, g.cfg.HeaderURL)
+			}
 			if it == nil {
 				return incomplete("no host answers %s in the %s: an envelope that is acknowledged, expired, retracted or never sent is not answered by a free question (bbox history asks for what a host keeps)", id, v)
 			}
@@ -471,6 +484,9 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 		return problem
 	}
 	it := l.Find(pos[0])
+	if it == nil && l.Refused(pos[0]) {
+		return incomplete("%s: the hosts answered it, each answer named above, and none verifies against the header source %s: nothing is taken, and it is not absent. Ask other hosts, or check the header source (bbox doctor)", pos[0], g.cfg.HeaderURL)
+	}
 	if it == nil {
 		// Acknowledged, or no longer answered: the carrier read kept is
 		// checked again, against this home's headers, as a host's answer is.

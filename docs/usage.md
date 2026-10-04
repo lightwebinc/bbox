@@ -138,9 +138,9 @@ quorum       = all
 | Code | Meaning |
 | --- | --- |
 | 0 | done, or everything asked verified and the hosts agree |
-| 1 | refused: a host answered something that does not verify (it is not shown), a message or a payment the recipient's checks refuse, a sweep or a payment the network refuses, or a host that asks for a second payment for one question |
+| 1 | refused: a message or a payment the recipient's checks refuse, a paid `history` page that holds what does not verify (the one host asked, named), a sweep or a payment the network refuses, or a host that asks for a second payment for one question |
 | 2 | usage, configuration, local or transport error, a quorum not met, a price over `-max-sats` or `-budget`, or a sweep a leg refused that may still mine (it stays in flight); what was persisted is sent or published by the next command |
-| 3 | incomplete: the hosts disagree, a host could not be asked, no host answers what was named, a budget ran out before the history was read to its end, or an output to sweep is spent by a transaction not yet mined. It proves nothing either way |
+| 3 | incomplete: the hosts disagree, a host answered something that does not verify (it is named and not shown), a host could not be asked, no host answers what was named, a budget ran out before the history was read to its end, or an output to sweep is spent by a transaction not yet mined. It proves nothing either way |
 
 ## An identity and its home
 
@@ -342,7 +342,12 @@ What one page and one walk hold is bounded whatever a host answers: at
 most 128 outputs are taken from a page, an answer is at most 16 MiB, and a
 host whose full page does not move past its cursor is asked no further. A
 host that answers something that does not verify is named, what it answered is
-not shown, and the exit is 1. Hosts that answer different sets are
+not shown, and the exit is 3: what is shown comes from the hosts whose
+answers verify, and one host at fault does not make a check fail. When
+every envelope the hosts answered is refused, the command says so and names
+the header source it was checked against, since a header source that does
+not answer fails every answer the same way; an envelope named that every
+host answered and none verified is not called absent. Hosts that answer different sets are
 reported, host by host, with the envelopes each lacks, and the exit is 3:
 the union is shown, never merged silently. An empty answer proves nothing.
 
@@ -504,7 +509,9 @@ pool.
 `-budget` (default 16000) everything the command pays. With `-all` each
 page is one paid question; when the budget cannot cover the next page the
 command stops and names the cursor to go on from (exit 3). A page that
-holds an envelope at or before the cursor it was asked after is refused. The free classes are never asked
+holds an envelope at or before the cursor it was asked after is refused.
+A page is one host's paid answer, with no other host beside it: an
+envelope in it that does not verify is refused (exit 1). The free classes are never asked
 here: a client never pays for them, whatever a document or a 402 says.
 
 ## A host's payee

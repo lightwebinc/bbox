@@ -295,6 +295,11 @@ func TestLimitsAndUsage(t *testing.T) {
 	h.want(h.run("alice", "", "fund", "-blocks", "1"), exitUsage, "on network main, import a payment with fund -txid")
 }
 
+// A host that edits an envelope it serves is named, and what it answered
+// is not shown: beside an honest host the envelope is read from that one,
+// and the command is incomplete (exit 3), never refused: one host at fault
+// does not make a check fail. Alone, nothing is shown, the host is named,
+// and the envelope is not said to be absent.
 func TestAHostThatEditsAnEnvelopeIsRefused(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -309,9 +314,20 @@ func TestAHostThatEditsAnEnvelopeIsRefused(t *testing.T) {
 		return beef
 	}
 	r := h.run("bob", "", "read")
-	h.want(r, exitRefused, "host "+h.bS.URL+": REFUSED "+tx)
-	if !strings.Contains(r.stdout, "the real text") || !strings.Contains(r.stdout, "hosts    "+h.aS.URL+"\n") {
-		t.Fatalf("the envelope from the honest host:\n%s", r.stdout)
+	h.want(r, exitIncomplete, "host "+h.bS.URL+": REFUSED "+tx)
+	if !strings.Contains(r.stdout, "the real text") || !strings.Contains(r.stdout, "hosts    "+h.aS.URL+"\n") ||
+		strings.Contains(r.stderr, "host "+h.aS.URL+": REFUSED") {
+		t.Fatalf("the envelope from the honest host:\n%s\n%s", r.stdout, r.stderr)
+	}
+	h.want(h.run("bob", "", "list"), exitIncomplete, "host "+h.bS.URL+": REFUSED "+tx)
+	// Both hosts edit it: nothing is shown, both are named, and the
+	// envelope named is not called absent.
+	h.a.Tamper = h.b.Tamper
+	r = h.run("bob", "", "read", tx)
+	h.want(r, exitIncomplete, "host "+h.aS.URL+": REFUSED "+tx)
+	if strings.Contains(r.stdout, "the real text") || !strings.Contains(r.stderr, "host "+h.bS.URL+": REFUSED "+tx) ||
+		strings.Contains(r.stderr, "no host answers") || !strings.Contains(r.stderr, "none verifies against the header source") {
+		t.Fatalf("every host edits the envelope:\n%s\n%s", r.stdout, r.stderr)
 	}
 }
 

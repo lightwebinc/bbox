@@ -146,10 +146,17 @@ func TestStaleProofsAreReplaced(t *testing.T) {
 	// verifies, and nothing is shown.
 	asset := h.env["BBOX_ASSET"]
 	delete(h.env, "BBOX_ASSET")
+	// The hosts did answer: each answer is named, with the header source
+	// it was checked against, never "no host answers".
 	r := h.run("bob", "", "list")
-	h.want(r, exitRefused, "a host answered what does not verify")
-	if strings.Contains(r.stdout, tx) {
-		t.Fatalf("an envelope under a stale proof was shown:\n%s", r.stdout)
+	h.want(r, exitIncomplete, "none verifies against the header source "+h.chainS.URL)
+	if strings.Contains(r.stdout, tx) || !strings.Contains(r.stderr, "host "+h.aS.URL+": REFUSED "+tx) || !strings.Contains(r.stderr, "host "+h.bS.URL+": REFUSED "+tx) {
+		t.Fatalf("an envelope under a stale proof:\n%s\n%s", r.stdout, r.stderr)
+	}
+	r = h.run("bob", "", "read", tx)
+	h.want(r, exitIncomplete, "none verifies against the header source "+h.chainS.URL)
+	if strings.Contains(r.stderr, "no host answers") {
+		t.Fatalf("an envelope under a stale proof, read by its txid:\n%s\n%s", r.stdout, r.stderr)
 	}
 	h.env["BBOX_ASSET"] = asset
 	h.a.Stale, h.b.Stale = false, false
