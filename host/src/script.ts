@@ -1,6 +1,6 @@
 /**
  * Script reading and canonical script rebuilding, the twin of the Go
- * internal/boxrec/script.go. The reader is this package's own rather than
+ * boxrec/script.go. The reader is this package's own rather than
  * the SDK's, so that the Go and TypeScript codecs read every byte string
  * the same way; every script a host checks is compared byte for byte with
  * the one rebuilt here.

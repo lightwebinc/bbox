@@ -23,7 +23,7 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction/template/p2pkh"
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 // Paid is a stand-in for a host's terms route (spec sections 7.3 and 7.4):

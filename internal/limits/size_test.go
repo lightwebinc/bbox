@@ -16,7 +16,7 @@ import (
 	"github.com/lightwebinc/bcommon/carrier"
 	"github.com/lightwebinc/bcommon/mint"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 // fragment is the object bytes one plane packet carries at the fabric's

@@ -17,9 +17,9 @@ import (
 	"github.com/lightwebinc/bcommon/mint"
 	"github.com/lightwebinc/bcommon/producer"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
-	"github.com/lightwebinc/bbox/internal/reader"
+	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/state"
+	"github.com/lightwebinc/bbox/reader"
 )
 
 // Retraction (spec section 6.4): a sweep spends funding-tree outputs, used

@@ -14,8 +14,8 @@ import (
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
-	"github.com/lightwebinc/bbox/internal/send"
 	"github.com/lightwebinc/bbox/internal/testchain"
+	"github.com/lightwebinc/bbox/send"
 	"strings"
 	"sync"
 	"sync/atomic"

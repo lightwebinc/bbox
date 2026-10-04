@@ -6,7 +6,7 @@ import (
 
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 type jsonCase struct {

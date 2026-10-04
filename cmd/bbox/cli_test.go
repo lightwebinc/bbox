@@ -20,8 +20,8 @@ import (
 
 	"github.com/lightwebinc/bbox/internal/config"
 	"github.com/lightwebinc/bbox/internal/limits"
-	"github.com/lightwebinc/bbox/internal/send"
 	"github.com/lightwebinc/bbox/internal/testchain"
+	"github.com/lightwebinc/bbox/send"
 )
 
 func init() {

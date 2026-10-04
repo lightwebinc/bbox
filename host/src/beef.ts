@@ -1,6 +1,6 @@
 /**
  * The BEEF shape the carrier's beef rule reads, the twin of the Go
- * internal/boxrec/beef.go: the counts a BEEF declares on the wire, and
+ * boxrec/beef.go: the counts a BEEF declares on the wire, and
  * whether a proof holds only the hashes it needs.
  */
 import type { MerklePath } from '@bsv/sdk'

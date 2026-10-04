@@ -13,10 +13,10 @@ import (
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
-	"github.com/lightwebinc/bbox/internal/send"
+	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/state"
 	"github.com/lightwebinc/bbox/internal/testchain"
+	"github.com/lightwebinc/bbox/send"
 )
 
 // isSweep reports a sweep: a funding-shaped tombstone and at most a change

@@ -3,6 +3,7 @@ package boxrec
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -13,6 +14,7 @@ import (
 	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
+	"github.com/lightwebinc/bcommon/guard"
 	"github.com/lightwebinc/bcommon/pushdrop"
 )
 
@@ -252,4 +254,54 @@ func Seal(ctx context.Context, w Signer, originator string, doc *Object, brc78 [
 	}
 	doc.Set(MemberSignature, hex.EncodeToString(r.Signature.Serialize()))
 	return Canonical(doc)
+}
+
+// Sealer is the two wallet methods SealEnvelope needs; every
+// wallet.Interface has them.
+type Sealer interface {
+	Signer
+	Encrypt(ctx context.Context, args wallet.EncryptArgs, originator string) (*wallet.EncryptResult, error)
+}
+
+// SealEnvelope encrypts the plaintext to the recipient under BRC-78 through
+// the sender's wallet (protocol [2, "message encryption"], a random key id)
+// and completes and signs the BRC-169 envelope (spec section 4). from is the
+// sender's identity key, the wallet's own, and to the recipient's. It
+// returns the content an envelope record carries (key 7).
+func SealEnvelope(ctx context.Context, w Sealer, originator string, from, to, plaintext []byte, created uint64) ([]byte, error) {
+	if w == nil {
+		return nil, errors.New("boxrec: nil wallet")
+	}
+	recipient, err := guard.ParsePubKey(to)
+	if err != nil {
+		return nil, fmt.Errorf("recipient: %w", err)
+	}
+	var keyID [32]byte
+	if _, err := rand.Read(keyID[:]); err != nil {
+		return nil, err
+	}
+	res, err := w.Encrypt(ctx, wallet.EncryptArgs{
+		EncryptionArgs: wallet.EncryptionArgs{
+			ProtocolID:   wallet.Protocol{SecurityLevel: 2, Protocol: "message encryption"},
+			KeyID:        base64.StdEncoding.EncodeToString(keyID[:]),
+			Counterparty: wallet.Counterparty{Type: wallet.CounterpartyTypeOther, Counterparty: recipient},
+		},
+		Plaintext: plaintext,
+	}, originator)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt: %w", err)
+	}
+	brc78 := append(append(append(append([]byte{}, BRC78Version...), from...), to...), keyID[:]...)
+	brc78 = append(brc78, res.Ciphertext...)
+	doc := &Object{}
+	doc.Set(MemberVersion, MetanetHandles)
+	party := func(k []byte) *Object {
+		o := &Object{}
+		o.Set(MemberIdentity, hex.EncodeToString(k))
+		return o
+	}
+	doc.Set(MemberRecipient, party(to))
+	doc.Set(MemberSender, party(from))
+	doc.Set(MemberCreated, RFC3339(created))
+	return Seal(ctx, w, originator, doc, brc78)
 }

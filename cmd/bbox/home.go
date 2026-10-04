@@ -22,13 +22,13 @@ import (
 	"github.com/lightwebinc/bcommon/publish"
 	"github.com/lightwebinc/bcommon/termsafe"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/config"
 	"github.com/lightwebinc/bbox/internal/limits"
-	"github.com/lightwebinc/bbox/internal/reader"
-	"github.com/lightwebinc/bbox/internal/send"
 	"github.com/lightwebinc/bbox/internal/state"
 	"github.com/lightwebinc/bbox/internal/unicast"
+	"github.com/lightwebinc/bbox/reader"
+	"github.com/lightwebinc/bbox/send"
 )
 
 // httpClient is the client for everything but submissions, which
@@ -52,8 +52,8 @@ func (g *global) openWallet() (*bwallet.Embedded, error) {
 // lockHome takes the home's lock: one command that spends from the pool or
 // writes the state at a time.
 func (g *global) lockHome() (func(), error) {
-	unlock, err := state.Lock(filepath.Join(g.cfg.Home, "lock"))
-	if errors.Is(err, state.ErrLocked) {
+	unlock, err := send.LockHome(g.cfg.Home)
+	if errors.Is(err, send.ErrLocked) {
 		return nil, usage("another bbox command is using the home %s (one at a time)", g.cfg.Home)
 	}
 	return unlock, err
@@ -93,7 +93,7 @@ func (g *global) openHome() (*home, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := state.Load(g.cfg.Home, e.Signer().IdentityHex())
+	st, err := send.LoadState(g.cfg.Home, e.Signer().IdentityHex())
 	if err != nil {
 		unlock()
 		return nil, err
@@ -541,7 +541,7 @@ func cmdOffice(_ context.Context, g *global, args []string) error {
 				return err
 			}
 			defer unlock()
-			st, err := state.Load(g.cfg.Home, e.Signer().IdentityHex())
+			st, err := send.LoadState(g.cfg.Home, e.Signer().IdentityHex())
 			if err != nil {
 				return err
 			}
@@ -557,7 +557,7 @@ func cmdOffice(_ context.Context, g *global, args []string) error {
 		if err != nil {
 			return err
 		}
-		st, err := state.Load(g.cfg.Home, e.Signer().IdentityHex())
+		st, err := send.LoadState(g.cfg.Home, e.Signer().IdentityHex())
 		if err != nil {
 			return err
 		}

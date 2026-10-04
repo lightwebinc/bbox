@@ -2,7 +2,7 @@
  * What the recipient does with an envelope it has read, spec sections 4.5,
  * 10 and 13: open the BRC-78 message through its own wallet, check the
  * plaintext, and check a payment before it internalizes it. The twin of the
- * Go internal/boxrec/payment.go. A host never sees the plaintext, so none
+ * Go boxrec/payment.go. A host never sees the plaintext, so none
  * of these is a host rule.
  */
 import { Beef, type ChainTracker, type Transaction, type WalletInterface } from '@bsv/sdk'

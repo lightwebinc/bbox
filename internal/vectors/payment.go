@@ -11,7 +11,7 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 // paymentBuild is the payment the vectors' payment envelope carries, and

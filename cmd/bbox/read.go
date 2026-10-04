@@ -30,12 +30,12 @@ import (
 	"github.com/lightwebinc/bcommon/purse"
 	"github.com/lightwebinc/bcommon/termsafe"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/limits"
-	"github.com/lightwebinc/bbox/internal/reader"
-	"github.com/lightwebinc/bbox/internal/send"
 	"github.com/lightwebinc/bbox/internal/state"
 	"github.com/lightwebinc/bbox/internal/unicast"
+	"github.com/lightwebinc/bbox/reader"
+	"github.com/lightwebinc/bbox/send"
 )
 
 // view is which envelope class a reading command asks: the inbox, a box, or
@@ -48,14 +48,10 @@ type view struct {
 }
 
 func (v view) query() reader.Query {
-	q := reader.Query{"office": v.office, "to": hex.EncodeToString(v.to)}
-	switch {
-	case v.box != "":
-		q["box"] = v.box
-	case v.from != "":
-		q["from"] = v.from
+	if v.box == "" && v.from != "" {
+		return reader.FromQuery(v.office, v.to, v.from)
 	}
-	return q
+	return reader.BoxQuery(v.office, v.to, v.box)
 }
 
 func (v view) String() string {
@@ -517,20 +513,11 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 	if err != nil {
 		return err
 	}
-	beef, err := m.Payment.AtomicBEEF(false)
+	ia, err := m.Internalize("bbox payment received", []string{"bbox", "payment"})
 	if err != nil {
-		return err
+		return refused("%v", err)
 	}
-	var outs []wallet.InternalizeOutput
-	for _, o := range m.Plain.Payment.Outputs {
-		r, err := purse.Remittance(m.Plain.Payment.DerivationPrefix, o.DerivationSuffix, hex.EncodeToString(e.From))
-		if err != nil {
-			return refused("%v", err)
-		}
-		outs = append(outs, wallet.InternalizeOutput{OutputIndex: o.OutputIndex, Protocol: wallet.InternalizeProtocolWalletPayment, PaymentRemittance: r})
-	}
-	if _, err := p.InternalizeAction(ctx, wallet.InternalizeActionArgs{Tx: beef, Description: "bbox payment received",
-		Labels: []string{"bbox", "payment"}, Outputs: outs}, g.cfg.Originator); err != nil {
+	if _, err := p.InternalizeAction(ctx, ia, g.cfg.Originator); err != nil {
 		var re *purse.RefusedError
 		if errors.As(err, &re) || strings.Contains(err.Error(), "spent its inputs") {
 			return refused("%v: the payment is reclaimed or double-spent", err)

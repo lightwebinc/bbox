@@ -36,7 +36,7 @@ import (
 	"github.com/lightwebinc/bcommon/hostset"
 	"github.com/lightwebinc/bcommon/lookup"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/limits"
 )
 
@@ -536,4 +536,20 @@ func Hash(txid string) ([32]byte, error) {
 		return [32]byte{}, fmt.Errorf("%q is not a transaction id (64 lowercase hex characters)", txid)
 	}
 	return [32]byte(*h), nil
+}
+
+// BoxQuery is the question for the open envelopes to the recipient to in
+// office: in one box, or in every box when box is empty (spec section 7.2).
+func BoxQuery(office string, to []byte, box string) Query {
+	q := Query{boxrec.QOffice: office, boxrec.QTo: hex.EncodeToString(to)}
+	if box != "" {
+		q[boxrec.QBox] = box
+	}
+	return q
+}
+
+// FromQuery is the question for the open envelopes to the recipient to in
+// office from one sender, its identity key in lowercase hex.
+func FromQuery(office string, to []byte, from string) Query {
+	return Query{boxrec.QOffice: office, boxrec.QTo: hex.EncodeToString(to), boxrec.QFrom: from}
 }

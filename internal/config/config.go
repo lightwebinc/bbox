@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/limits"
 )
 

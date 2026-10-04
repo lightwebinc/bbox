@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -10,7 +11,9 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker"
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bcommon/purse"
+
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 // Recipient is what a recipient's wallet does for the checks of spec
@@ -104,4 +107,31 @@ func Open(ctx context.Context, w Recipient, originator string, it *Item, headers
 	}
 	m.Payment, m.PayErr = boxrec.CheckPayment(ctx, w, originator, c.Envelope, p.Payment, headers, uint64(t))
 	return m
+}
+
+// Internalize is what the recipient hands its wallet's internalizeAction
+// for a payment that passed every check (m.Payment set): the payment as
+// Atomic BEEF and, for each output the plaintext lists, a BRC-29 wallet
+// payment with the remittance its derivation prefix and suffix and the
+// sender's key make. description and labels are the wallet's, as BRC-100
+// takes them.
+func (m *Message) Internalize(description string, labels []string) (wallet.InternalizeActionArgs, error) {
+	var args wallet.InternalizeActionArgs
+	if m.Payment == nil || m.Plain == nil || m.Plain.Payment == nil {
+		return args, errors.New("reader: no payment that passed the recipient's checks")
+	}
+	beef, err := m.Payment.AtomicBEEF(false)
+	if err != nil {
+		return args, err
+	}
+	from := hex.EncodeToString(m.Item.Envelope().From)
+	outs := make([]wallet.InternalizeOutput, 0, len(m.Plain.Payment.Outputs))
+	for _, o := range m.Plain.Payment.Outputs {
+		r, err := purse.Remittance(m.Plain.Payment.DerivationPrefix, o.DerivationSuffix, from)
+		if err != nil {
+			return args, err
+		}
+		outs = append(outs, wallet.InternalizeOutput{OutputIndex: o.OutputIndex, Protocol: wallet.InternalizeProtocolWalletPayment, PaymentRemittance: r})
+	}
+	return wallet.InternalizeActionArgs{Tx: beef, Description: description, Labels: labels, Outputs: outs}, nil
 }

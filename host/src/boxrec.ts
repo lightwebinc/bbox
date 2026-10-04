@@ -1,6 +1,6 @@
 /**
  * The byte-level contract of bbox, the twin of the Go package
- * internal/boxrec: the envelope record an envelope carrier holds, the
+ * boxrec: the envelope record an envelope carrier holds, the
  * receipt record a receipt carrier holds, the office and box name grammars,
  * and the classifier that says which record an output claims. docs/spec.md
  * is the normative text; the vectors under testdata/vectors hold both codecs

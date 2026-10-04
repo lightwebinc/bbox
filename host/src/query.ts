@@ -1,6 +1,6 @@
 /**
  * The ls_bbox question classes and their validation, spec section 7.2: the
- * twin of the Go internal/boxrec/query.go. A question is validated as
+ * twin of the Go boxrec/query.go. A question is validated as
  * parsed (JSON.parse's object, where a member given twice took its last
  * value) and must carry exactly the members of one class.
  */

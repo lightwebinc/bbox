@@ -15,11 +15,11 @@ import (
 	"github.com/lightwebinc/bcommon/guard"
 	"github.com/lightwebinc/bcommon/termsafe"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/config"
 	"github.com/lightwebinc/bbox/internal/limits"
-	"github.com/lightwebinc/bbox/internal/send"
 	"github.com/lightwebinc/bbox/internal/state"
+	"github.com/lightwebinc/bbox/send"
 )
 
 // refFlags collects -ref values.

@@ -1,6 +1,6 @@
 /**
  * The topic manager's transaction rules of spec section 8.1, the twin of
- * the Go internal/boxrec/admit.go: classification, then the carrier's rules
+ * the Go boxrec/admit.go: classification, then the carrier's rules
  * 1 to 10, the sweep rule, or the spend rule. A transaction is refused for
  * the first rule it breaks, with the same reason label in both languages,
  * and every refusal is thrown: a topic manager raises it rather than answer

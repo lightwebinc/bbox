@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 func item(txid string, created uint64) *Item {

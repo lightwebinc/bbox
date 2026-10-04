@@ -22,7 +22,7 @@ import (
 	"github.com/lightwebinc/bcommon/mint"
 	"github.com/lightwebinc/bcommon/pushdrop"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 // originator is the wallet originator the vectors sign under.

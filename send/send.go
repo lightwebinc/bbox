@@ -37,22 +37,20 @@ import (
 	"github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker"
-	"github.com/bsv-blockchain/go-sdk/wallet"
 
 	"github.com/lightwebinc/bcommon/bwallet"
 	"github.com/lightwebinc/bcommon/carrier"
 	"github.com/lightwebinc/bcommon/funding"
-	"github.com/lightwebinc/bcommon/guard"
 	"github.com/lightwebinc/bcommon/mint"
 	"github.com/lightwebinc/bcommon/nodeapi"
 	"github.com/lightwebinc/bcommon/producer"
 	"github.com/lightwebinc/bcommon/publish"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/limits"
-	"github.com/lightwebinc/bbox/internal/reader"
 	"github.com/lightwebinc/bbox/internal/state"
 	"github.com/lightwebinc/bbox/internal/unicast"
+	"github.com/lightwebinc/bbox/reader"
 )
 
 // Params are the carrier parameters of every bbox carrier.
@@ -539,44 +537,6 @@ type Letter struct {
 	Pay *Pay
 }
 
-// Seal encrypts the plaintext to the recipient under BRC-78 through the
-// sender's wallet (protocol [2, "message encryption"], a random key id) and
-// completes and signs the BRC-169 envelope (spec section 4).
-func Seal(ctx context.Context, w wallet.Interface, originator string, from, to, plaintext []byte, created uint64) ([]byte, error) {
-	recipient, err := guard.ParsePubKey(to)
-	if err != nil {
-		return nil, fmt.Errorf("recipient: %w", err)
-	}
-	var keyID [32]byte
-	if _, err := rand.Read(keyID[:]); err != nil {
-		return nil, err
-	}
-	res, err := w.Encrypt(ctx, wallet.EncryptArgs{
-		EncryptionArgs: wallet.EncryptionArgs{
-			ProtocolID:   wallet.Protocol{SecurityLevel: 2, Protocol: "message encryption"},
-			KeyID:        base64.StdEncoding.EncodeToString(keyID[:]),
-			Counterparty: wallet.Counterparty{Type: wallet.CounterpartyTypeOther, Counterparty: recipient},
-		},
-		Plaintext: plaintext,
-	}, originator)
-	if err != nil {
-		return nil, fmt.Errorf("encrypt: %w", err)
-	}
-	brc78 := append(append(append(append([]byte{}, boxrec.BRC78Version...), from...), to...), keyID[:]...)
-	brc78 = append(brc78, res.Ciphertext...)
-	doc := &boxrec.Object{}
-	doc.Set(boxrec.MemberVersion, boxrec.MetanetHandles)
-	party := func(k []byte) *boxrec.Object {
-		o := &boxrec.Object{}
-		o.Set(boxrec.MemberIdentity, hex.EncodeToString(k))
-		return o
-	}
-	doc.Set(boxrec.MemberRecipient, party(to))
-	doc.Set(boxrec.MemberSender, party(from))
-	doc.Set(boxrec.MemberCreated, boxrec.RFC3339(created))
-	return boxrec.Seal(ctx, w, originator, doc, brc78)
-}
-
 // Envelope seals l, mints its carrier, persists it and publishes it. The
 // record is written to the state before anything leaves the machine.
 func (e *Engine) Envelope(ctx context.Context, l Letter) (sent *state.Sent, err error) {
@@ -586,7 +546,7 @@ func (e *Engine) Envelope(ctx context.Context, l Letter) (sent *state.Sent, err 
 		}
 	}()
 	from := e.Signer.Identity.Compressed()
-	content, err := Seal(ctx, e.Signer, e.Signer.Originator, from, l.To, l.Plaintext, l.Created)
+	content, err := boxrec.SealEnvelope(ctx, e.Signer, e.Signer.Originator, from, l.To, l.Plaintext, l.Created)
 	if err != nil {
 		return nil, err
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/lightwebinc/bcommon/cbor"
 	"github.com/lightwebinc/bcommon/pushdrop"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 // spec describes one envelope vector before it is sealed.

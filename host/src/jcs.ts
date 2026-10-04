@@ -2,7 +2,7 @@
  * The JSON subset an envelope's content (and the recipient's plaintext) is
  * written in, spec section 4.1: I-JSON (RFC 7493) with integers only,
  * nesting at most 16, serialized exactly as RFC 8785 (JCS) serializes it.
- * The twin of the Go internal/boxrec/jcs.go, step for step: its own parser
+ * The twin of the Go boxrec/jcs.go, step for step: its own parser
  * rather than JSON.parse, which takes the last of two equal member names and
  * cannot report the duplicate the subset refuses.
  */

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 // The policy limits of docs/limits.md, as the bbox command applies them. None

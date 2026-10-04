@@ -18,7 +18,7 @@ import (
 
 	"github.com/lightwebinc/bcommon/guard"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 // Host is a stand-in overlay host carrying bbox offices: /submit runs the

@@ -175,6 +175,33 @@ func ParsePlaintext(b []byte) (*Plaintext, error) {
 	return p, nil
 }
 
+// EncodePlaintext writes doc as a plaintext: its canonical serialization,
+// held to the recipient's rules (ParsePlaintext) before it is returned, so a
+// sender never seals what the recipient refuses. Members this contract does
+// not define (an application's own, section 4.5) are carried as they are.
+func EncodePlaintext(doc *Object) ([]byte, error) {
+	b, err := Canonical(doc)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrPlaintextJSON, err)
+	}
+	if _, err := ParsePlaintext(b); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// Extension is a member of the plaintext this contract does not define,
+// when it is present and an object: an application's own member, which
+// bbox carries and ignores (section 4.5). Its own members, unknown ones
+// included, are as the sender wrote them.
+func (p *Plaintext) Extension(name string) (*Object, bool) {
+	switch name {
+	case PlainBody, PlainPayment, PlainRefs:
+		return nil, false
+	}
+	return member[*Object](p.Doc, name)
+}
+
 func parseRefs(v any) ([]Ref, error) {
 	arr, ok := v.([]any)
 	if !ok {

@@ -17,7 +17,7 @@ import (
 
 	"github.com/lightwebinc/bcommon/carrier"
 
-	"github.com/lightwebinc/bbox/internal/boxrec"
+	"github.com/lightwebinc/bbox/boxrec"
 )
 
 const dir = "../../testdata/vectors"

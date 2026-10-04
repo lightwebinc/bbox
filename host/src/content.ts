@@ -1,7 +1,7 @@
 /**
  * An envelope record's content: a BRC-169 section 7.2 envelope, checked
  * against the record in the order of spec section 4.6. The twin of the Go
- * internal/boxrec/content.go.
+ * boxrec/content.go.
  */
 import { readerLockingKey, verifyFieldSignature } from '@lightwebinc/bcommon'
 import { KeySignature, Protocol, Refusal, type Envelope } from './boxrec.js'
