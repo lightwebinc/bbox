@@ -1,27 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync"
 
-	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
-	"github.com/bsv-blockchain/go-sdk/wallet"
-
+	"github.com/lightwebinc/bcommon/payee"
 	"github.com/lightwebinc/bcommon/purse"
-	"github.com/lightwebinc/bcommon/termsafe"
 
 	"github.com/lightwebinc/bbox/internal/limits"
-	"github.com/lightwebinc/bbox/internal/state"
 )
 
 const payeeHelp = `usage: bbox payee key -out FILE
@@ -75,73 +62,32 @@ func payeeKey(g *global, out string) error {
 	if out == "" {
 		return usage("payee key writes a secret: name a file with -out (it is created at mode 0600), or -out - to print it")
 	}
-	raw, err := os.ReadFile(filepath.Join(g.cfg.Home, "identity.json"))
+	k, err := payee.HomeKey(g.cfg.Home, "bbox")
 	if err != nil {
-		return fmt.Errorf("open the home %s: %w (run `bbox init`)", g.cfg.Home, err)
+		return err
 	}
-	var id struct {
-		WIF string `json:"wif"`
-	}
-	if err := json.Unmarshal(raw, &id); err != nil {
-		return fmt.Errorf("identity.json: %w", err)
-	}
-	k, err := ec.PrivateKeyFromWif(id.WIF)
-	if err != nil {
-		return fmt.Errorf("identity.json: %w", err)
-	}
-	line := fmt.Sprintf("BBOX_PAYEE_KEY=%s\n", hex.EncodeToString(k.Serialize()))
+	env := payee.KeyEnv("bbox")
 	if out == "-" {
-		fmt.Fprint(g.stdout, line)
-		g.say("the line above is a private key: keep it out of logs and shells' history")
+		fmt.Fprint(g.stdout, payee.KeyLine(env, k))
+		g.say("%s", payee.PrintedKeyNote)
 		return nil
 	}
-	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // the operator's own path
+	note, err := payee.CreateKeyFile(out, env, k)
+	if errors.Is(err, payee.ErrKeyFileExists) {
+		return usage("%s exists; payee key never writes over a file", out)
+	}
 	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return usage("%s exists; payee key never writes over a file", out)
-		}
 		return err
 	}
-	if _, err := fmt.Fprint(f, line); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	fmt.Fprintf(g.stdout, "wrote BBOX_PAYEE_KEY to %s for payee %s\n", out, hex.EncodeToString(k.PubKey().Compressed()))
+	fmt.Fprintln(g.stdout, note)
 	return nil
 }
 
-// ledgerLine is one line of a host's payments.jsonl.
-type ledgerLine struct {
-	Txid              string `json:"txid"`
-	Beef              string `json:"beef"`
-	OutputIndex       uint32 `json:"outputIndex"`
-	Satoshis          uint64 `json:"satoshis"`
-	DerivationPrefix  string `json:"derivationPrefix"`
-	DerivationSuffix  string `json:"derivationSuffix"`
-	SenderIdentityKey string `json:"senderIdentityKey"`
-	Class             string `json:"class"`
-}
-
-// payeeSettle internalizes every payment in the ledger this home has not.
+// payeeSettle internalizes every payment in the ledgers this home has not.
 func payeeSettle(ctx context.Context, g *global, paths []string, inFlight int) error {
-	var lines []ledgerLine
-	seen := map[string]bool{}
-	for _, path := range paths {
-		ls, err := readLedger(g, path)
-		if err != nil {
-			return err
-		}
-		for _, l := range ls {
-			// The same payment in two ledgers (a copy, or two hosts sharing
-			// one) is settled once.
-			if !seen[l.Txid] {
-				seen[l.Txid] = true
-				lines = append(lines, l)
-			}
-		}
+	ps, err := payee.ReadLedgers(g.stderr, paths...)
+	if err != nil {
+		return err
 	}
 	h, err := g.openHome()
 	if err != nil {
@@ -156,147 +102,15 @@ func payeeSettle(ctx context.Context, g *global, paths []string, inFlight int) e
 	if err != nil {
 		return err
 	}
-	var settled, already, failed, unsettleable, refusedNow int
-	var sats uint64
-	notSettled := func(l ledgerLine, err error) {
-		failed++
-		g.say("payment %s (%d sat, %s): NOT SETTLED: %v", l.Txid, l.Satoshis, termsafe.Text(l.Class), err)
+	rep, err := (&payee.Settler{App: "bbox", Payer: p, Record: payee.Saved(&h.st.Book, h.st.Save), Pool: h.e.Pool,
+		InFlight: inFlight, Out: g.stdout, Warn: g.stderr}).Settle(ctx, ps)
+	if err != nil {
+		return err
 	}
-	// Every payment is checked first, then broadcast, and the proofs are
-	// awaited together: at most inFlight are broadcast and not yet mined
-	// at once, so a run takes about one block, not one block a payment.
-	type job struct {
-		l  ledgerLine
-		in *purse.Incoming
-	}
-	var jobs []job
-	for _, l := range lines {
-		if slices.Contains(h.st.Settled, l.Txid) {
-			already++
-			continue
-		}
-		if h.st.IsUnsettleable(l.Txid) {
-			unsettleable++
-			continue
-		}
-		in, err := checkPayment(ctx, g, p, l)
-		if err != nil {
-			notSettled(l, err)
-			continue
-		}
-		jobs = append(jobs, job{l, in})
-	}
-	type result struct {
-		job
-		err error
-	}
-	results := make(chan result)
-	sem := make(chan struct{}, inFlight)
-	go func() {
-		var wg sync.WaitGroup
-		for _, j := range jobs {
-			sem <- struct{}{}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
-				err := p.Broadcast(ctx, j.in)
-				if err == nil {
-					err = p.Await(ctx, j.in)
-				}
-				results <- result{j, err}
-			}()
-		}
-		wg.Wait()
-		close(results)
-	}()
-	for r := range results {
-		err := r.err
-		if err == nil {
-			err = p.Take(r.in)
-		}
-		var re *purse.RefusedError
-		if errors.As(err, &re) {
-			// It will never mine: reported once, recorded, and passed over
-			// by every later run.
-			refusedNow++
-			g.say("payment %s (%d sat, %s): REFUSED, NEVER SETTLES: %s; the payer took the coins back after the question was answered", r.l.Txid, r.l.Satoshis, termsafe.Text(r.l.Class), termsafe.Text(re.Why))
-			h.st.Unsettleable = append(h.st.Unsettleable, state.Unsettleable{Txid: r.l.Txid, Why: re.Why})
-			if err := h.st.Save(); err != nil {
-				return err
-			}
-			continue
-		}
-		if err != nil {
-			notSettled(r.l, payWords(err, 0))
-			continue
-		}
-		h.st.Settled = append(h.st.Settled, r.l.Txid)
-		if err := h.st.Save(); err != nil {
-			return err
-		}
-		settled++
-		sats += r.l.Satoshis
-		fmt.Fprintf(g.stdout, "settled %s: %d sat for %s from %s\n", r.l.Txid, r.l.Satoshis, termsafe.Text(r.l.Class), termsafe.Abbrev(r.l.SenderIdentityKey))
-	}
-	fmt.Fprintf(g.stdout, "%d payment(s) settled, %d sat; %d settled before; %d not settled; %d refused (%d before); pool %d output(s), %d sat\n",
-		settled, sats, already, failed, refusedNow, unsettleable, h.e.Pool.Count(), h.e.Pool.Balance())
-	switch {
-	case refusedNow > 0:
-		return refused("%d payment(s) refused by the network: their payers spent the coins elsewhere, and they will never settle", refusedNow)
-	case failed > 0:
-		return refused("%d payment(s) not settled: until one is, its payer can spend the coins elsewhere", failed)
+	if problem := rep.Problem(); problem != "" {
+		return refused("%s", problem)
 	}
 	return nil
-}
-
-// readLedger reads a host's payments.jsonl, passing over a line that does
-// not parse: one cut short by a crash, whose question was never answered.
-func readLedger(g *global, path string) ([]ledgerLine, error) {
-	f, err := os.Open(path) //nolint:gosec // the operator's own path
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	var lines []ledgerLine
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1<<20), 16<<20)
-	n := 0
-	for sc.Scan() {
-		n++
-		t := strings.TrimSpace(sc.Text())
-		if t == "" {
-			continue
-		}
-		var l ledgerLine
-		if err := json.Unmarshal([]byte(t), &l); err != nil || l.Txid == "" {
-			g.say("%s line %d: not a payment; skipped", path, n)
-			continue
-		}
-		lines = append(lines, l)
-	}
-	return lines, sc.Err()
-}
-
-func checkPayment(ctx context.Context, g *global, p *purse.Purse, l ledgerLine) (*purse.Incoming, error) {
-	beef, err := base64.StdEncoding.DecodeString(l.Beef)
-	if err != nil {
-		return nil, fmt.Errorf("the ledger's BEEF is not base64: %w", err)
-	}
-	r, err := purse.Remittance(l.DerivationPrefix, l.DerivationSuffix, l.SenderIdentityKey)
-	if err != nil {
-		return nil, err
-	}
-	in, err := p.Check(ctx, wallet.InternalizeActionArgs{Tx: beef, Description: "bbox priced question " + l.Class,
-		Labels: []string{"bbox", "payee"}, Outputs: []wallet.InternalizeOutput{{OutputIndex: l.OutputIndex,
-			Protocol: wallet.InternalizeProtocolWalletPayment, PaymentRemittance: r}}})
-	if err != nil {
-		return nil, err
-	}
-	if in.Txid != l.Txid {
-		return nil, fmt.Errorf("the ledger names %s and its BEEF holds %s", l.Txid, in.Txid)
-	}
-	return in, nil
 }
 
 // payWords puts a refusal of the purse in this command's words. The library

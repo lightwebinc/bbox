@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "identity": "0211111111111111111111111111111111111111111111111111111111111111",
+  "received": [
+    {
+      "txid": "aa11",
+      "office": "example_abcdefghij",
+      "from": "02ab",
+      "box": "inbox",
+      "created": 1
+    }
+  ],
+  "settled": [
+    "8204ea1e4c1f881373cbed63c09a45797fb4d8795cd0596af0a0fff385927cb2",
+    "7e075c2662fcfdd85a1b2235fa23c57b59bf2123db7c132f7ec6fb42b3e3b056"
+  ],
+  "unsettleable": [
+    {
+      "txid": "46608f785a1f65b0ce37238455737df12752752e1491bf04e00da097cdeb071c",
+      "why": "input 0 (fabc2752c6217e8065968e779b628f42a192bb808a2b1f882ac3afef6a01e71c.0) is spent by 8204ea1e4c1f881373cbed63c09a45797fb4d8795cd0596af0a0fff385927cb2 \u003c\u0026\u003e"
+    }
+  ],
+  "lastSentMs": 1700000000000
+}

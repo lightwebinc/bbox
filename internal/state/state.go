@@ -24,6 +24,7 @@ import (
 
 	"github.com/lightwebinc/bcommon/bwallet"
 	"github.com/lightwebinc/bcommon/funding"
+	"github.com/lightwebinc/bcommon/payee"
 )
 
 // Version is the state file's format version.
@@ -72,13 +73,10 @@ type State struct {
 	Sweeps   []Sweep   `json:"sweeps,omitempty"`
 	// Received are the envelopes to this identity it has read.
 	Received []Received `json:"received,omitempty"`
-	// Settled are the txids of payments to this identity as a host's payee
-	// that payee settle internalized.
-	Settled []string `json:"settled,omitempty"`
-	// Unsettleable are payments to this identity as a payee that the
-	// network refused for good (the payer spent the inputs elsewhere):
-	// settle reports each once and then passes it over.
-	Unsettleable []Unsettleable `json:"unsettleable,omitempty"`
+	// Book is what payee settle did for this identity as a host's payee:
+	// the payments it settled ("settled") and those the network refused
+	// for good ("unsettleable").
+	payee.Book
 	// LastSentMs is when the last envelope was built, Unix milliseconds,
 	// for the send rate.
 	LastSentMs int64 `json:"lastSentMs,omitempty"`
@@ -266,17 +264,6 @@ type Sweep struct {
 	// in flight, retracts nothing, and the outputs it named may be swept
 	// again.
 	Failed string `json:"failed,omitempty"`
-}
-
-// Unsettleable is a payment the network refused, and why.
-type Unsettleable struct {
-	Txid string `json:"txid"`
-	Why  string `json:"why"`
-}
-
-// IsUnsettleable reports whether txid is a payment recorded as refused.
-func (s *State) IsUnsettleable(txid string) bool {
-	return slices.ContainsFunc(s.Unsettleable, func(u Unsettleable) bool { return u.Txid == txid })
 }
 
 // Received is an envelope to this identity it has read.
