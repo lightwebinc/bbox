@@ -23,7 +23,7 @@
  * payments are then held, and is written to unsettleable.jsonl in the state
  * directory and logged.
  */
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MerklePath, Transaction, type ChainTracker } from '@bsv/sdk'
 import {
@@ -93,8 +93,9 @@ export class ArcadeHttp implements Broadcaster {
         continue
       }
       const why = `arcade answered ${res.status}: ${body.slice(0, 300)}`
-      if (/already/i.test(body)) return { txStatus: 'SEEN_ON_NETWORK', extraInfo: 'already known' }
       if (res.status === 422 || (res.status >= 460 && res.status <= 475)) throw new BroadcastRefused(why)
+      // Known already is not a verdict: the status is read again (GET /tx), never assumed.
+      if (/already (known|in (the )?mempool)|txn-already-known/i.test(body) && !/spent/i.test(body)) return { txStatus: 'RECEIVED', extraInfo: 'already known' }
       throw new Error(why)
     }
   }
@@ -139,7 +140,7 @@ export class AssetHttp implements NodeView {
 
   async proof(txid: string): Promise<MerklePath | undefined> {
     const res = await fetch(this.url(`/api/v1/merkle_proof/${txid}`), { signal: AbortSignal.timeout(timeout) })
-    if (res.status === 404 || res.status === 500) return undefined
+    if (res.status === 404) return undefined
     if (res.status !== 200) throw new Error(`merkle_proof ${txid}: ${res.status}`)
     const raw = new Uint8Array(await res.arrayBuffer())
     if (raw.length > 1 << 20) throw new Error('merkle_proof: too large')
@@ -166,6 +167,10 @@ export interface GateOptions {
   pollMs?: number
   /** How long a fast payment may stay unmined before it is reported; default a day. */
   maxAgeMs?: number
+  /** The most fast payments watched at once; past it a payment is held. Default 100000. */
+  maxWatched?: number
+  /** The most watched payments one sweep checks, oldest checked first; default 500, 8 at a time. */
+  sweepBatch?: number
   /** Where unsettleable.jsonl is written; none in tests. */
   stateDir?: string
   now?: () => number
@@ -185,6 +190,13 @@ export const PaymentLabels: Array<[Decision | 'requested', string]> = [
   ['hold', 'no-network-verdict'],
   ['hold', 'double-spend-attempted'],
   ['hold', 'spend-view-unknown'],
+  ['hold', 'already-charged'],
+  ['hold', 'payer-asked-hold'],
+  ['hold', 'price-unknown'],
+  ['hold', 'price-stale'],
+  ['hold', 'no-txid'],
+  ['hold', 'watch-limit'],
+  ['refuse', 'pays-nothing'],
   ['refuse', 'malformed'],
   ['refuse', 'wrong-script'],
   ['refuse', 'spv-failed'],
@@ -259,6 +271,32 @@ export class PaymentGate {
     for (const [decision, reason] of PaymentLabels) o.host.metrics.preset(`${o.app}_payments_total`, { decision, reason })
     for (const kind of EventKinds) o.host.metrics.preset(`${o.app}_payment_events_total`, { kind })
     o.host.metrics.gauge(`${o.app}_payments_unmined`, () => this.watched.size)
+    this.reflag()
+  }
+
+  /** Flags again every payer unsettleable.jsonl names: a flag outlives a restart. */
+  private reflag(): void {
+    if (this.o.stateDir === undefined) return
+    let text = ''
+    try {
+      text = readFileSync(join(this.o.stateDir, 'unsettleable.jsonl'), 'utf8')
+    } catch {
+      return
+    }
+    for (const l of text.split('\n')) {
+      try {
+        const v = JSON.parse(l) as { kind?: unknown; txid?: unknown; payer?: unknown }
+        if (typeof v.payer === 'string' && typeof v.kind === 'string' && typeof v.txid === 'string') this.exposure.flag(v.payer, `${v.kind}: ${v.txid}`)
+      } catch {
+        // a line cut short
+      }
+    }
+  }
+
+  /** Releases and stops watching a payment the route did not take after all. */
+  forget(txid: string): void {
+    this.exposure.release(txid)
+    this.watched.delete(txid)
   }
 
   /** True when the host can take a payment on the fast path at all. */
@@ -284,7 +322,21 @@ export class PaymentGate {
     const over = overspends(tx)
     if (over !== undefined) return { decision: 'refuse', reason: 'outputs-exceed-inputs', detail: over }
     const { arcade, node } = this.o
-    if (arcade === undefined || node === undefined) return { decision: 'hold', reason: 'no-broadcast-leg', detail: 'this host has no arcade or no node to take a payment fast' }
+    if (arcade === undefined || node === undefined) {
+      // Not fast without both; still broadcast and still answer a mined one where it can.
+      if (arcade !== undefined) {
+        try {
+          for (const a of unminedAncestors(tx)) await arcade.submit(Uint8Array.from(a.toEF())).catch(() => undefined)
+          const st = await arcade.submit(Uint8Array.from(tx.toEF()))
+          if (arcadeVerdict(st) === 'refused') return { decision: 'refuse', reason: 'network-refused', detail: `${st.txStatus} ${st.extraInfo ?? ''}`.trim() }
+        } catch (e) {
+          if (e instanceof BroadcastRefused) return { decision: 'refuse', reason: 'network-refused', detail: e.message }
+        }
+      }
+      if (await this.mined(tx)) return { decision: 'fast', reason: 'mined' }
+      return { decision: 'hold', reason: 'no-broadcast-leg', detail: 'this host has no arcade or no node to take a payment fast' }
+    }
+    if (this.watched.size >= (this.o.maxWatched ?? 100_000) && !(await this.mined(tx))) return { decision: 'hold', reason: 'watch-limit', detail: 'too many fast payments are waiting to mine' }
     const d = await decidePayment(this.o.policy, this.exposure, { payer, txid, sats }, this.now())
     if (d.decision === 'refuse') return { decision: 'refuse', reason: d.reason }
     const fast = d.decision === 'fast'
@@ -363,7 +415,8 @@ export class PaymentGate {
     try {
       const mp = await this.o.node.proof(txid)
       return mp !== undefined && (await mp.verify(txid, this.o.headers))
-    } catch {
+    } catch (e) {
+      this.o.host.log(`${this.o.app} proof read failed`, { txid, err: String(e) })
       return false
     }
   }
@@ -371,9 +424,10 @@ export class PaymentGate {
   /** Watches a fast payment taken before a restart, charged as it was. */
   restore(tx: Transaction, payer: string, sats: number, at: number): void {
     const txid = tx.id('hex')
+    const age = this.now() - at
+    if (age > (this.o.maxAgeMs ?? 86_400_000)) return
     const window = this.o.policy.window
-    if (window > 0 && this.now() - at > window) return
-    this.exposure.charge(payer, txid, sats, at)
+    if (window <= 0 || age <= window) this.exposure.charge(payer, txid, sats, at)
     this.watched.set(txid, { tx, payer, sats, since: at })
   }
 
@@ -386,14 +440,26 @@ export class PaymentGate {
   async sweep(): Promise<GateEvent[]> {
     const events: GateEvent[] = []
     const maxAge = this.o.maxAgeMs ?? 86_400_000
-    for (const [txid, w] of [...this.watched]) {
-      const ev = await this.check(txid, w, maxAge)
-      if (ev === undefined) continue
+    // The oldest checked first; each checked one goes to the back.
+    const batch = [...this.watched].slice(0, this.o.sweepBatch ?? 500)
+    for (const [txid, w] of batch) {
       this.watched.delete(txid)
-      if (ev.kind === 'confirmed') this.exposure.release(txid)
-      else this.exposure.flag(w.payer, `${ev.kind}: ${txid}`)
-      events.push(ev)
+      this.watched.set(txid, w)
     }
+    let next = 0
+    const worker = async (): Promise<void> => {
+      while (next < batch.length) {
+        const [txid, w] = batch[next++]!
+        const ev = await this.check(txid, w, maxAge).catch(() => undefined)
+        if (ev === undefined || !this.watched.has(txid)) continue
+        this.watched.delete(txid)
+        if (ev.kind === 'confirmed') this.exposure.release(txid)
+        else this.exposure.flag(w.payer, `${ev.kind}: ${txid}`)
+        events.push(ev)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(8, batch.length) }, worker))
+    events.sort((a, b) => (a.txid < b.txid ? -1 : 1))
     for (const ev of events) this.record(ev)
     return events
   }

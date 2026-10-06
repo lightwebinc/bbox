@@ -255,15 +255,21 @@ verdict within 10 s, a spend view that cannot say) is answered 402
 does not pay again. The held payment is recorded in `payments.jsonl` with
 `"decision":"hold"`, keeps its coins, and the same payment sent again is
 answered once the node serves its proof and that proof verifies against the
-host's headers. A host with no arcade or no node holds every payment.
+host's headers. A host with no arcade or no node holds every payment (with
+arcade alone it still broadcasts, and with the node alone it answers a
+payment the node shows mined). At most 100,000 fast payments are watched at
+once; past that a payment is held (`watch-limit`).
 
-Every fast payment is watched on the host's background tick (every 30 s)
-until it mines. One whose input another transaction spent, that arcade
-refuses, or that has not mined within a day, is written to
-`unsettleable.jsonl` in the state directory, logged, and counted; its payer
-is then held for confirmation on every later payment until the host
-restarts. Nothing is clawed back: the answer was given. A restart watches
-the fast lines of the last window again.
+Every fast payment is watched on the host's background tick (every 30 s,
+the 500 least recently checked each time) until it mines. One whose input
+another transaction spent, that arcade refuses, or that has not mined
+within a day, is written to `unsettleable.jsonl` in the state directory,
+logged, and counted; its payer is then held for confirmation on every
+later payment. Flags outlive a restart: the host reads `unsettleable.jsonl`
+when it starts, so an operator unflags a payer by removing its lines and
+restarting. Nothing is clawed back: the answer was given. A restart
+watches the fast lines of the last day again, and counts those of the last
+window against the limits.
 
 The ledger line carries `decision` (`fast`, `hold` or `mined`) and
 `reason`; `bbox payee settle` reads it as before.

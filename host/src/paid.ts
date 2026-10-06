@@ -902,6 +902,8 @@ export class LookupFront {
     accepted.decision = v.decision === 'hold' ? 'hold' : v.reason === 'mined' ? 'mined' : 'fast'
     accepted.reason = v.reason
     const claim = this.o.receiver!.claim(accepted)
+    // Taken fast and then not taken: nothing is owed, so nothing is charged or watched.
+    if (claim !== 'accepted' && v.decision === 'fast') this.gate!.forget(accepted.txid)
     if (claim === 'replayed') return replayed()
     if (claim === 'conflict') return conflict()
     if (v.decision === 'hold') {

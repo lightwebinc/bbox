@@ -31,7 +31,7 @@ import { DefaultBudget, DefaultResponseBudget, type BudgetConfig, type ResponseB
 import { MemoryJournal } from './journal.js'
 import { bboxModule } from './module.js'
 import { BoundedSessions, LedgerReceiver, LookupFront, MemoryReceiver, parsePrices, spentOutpoints, termsDocument, type ReceivedPayment } from './paid.js'
-import { PaymentGate, isFinal, overspends } from './accept.js'
+import { ArcadeHttp, BroadcastRefused, PaymentGate, isFinal, overspends } from './accept.js'
 import { PaymentProtocol } from './payment.js'
 import { TestNetwork } from './testnetwork.js'
 import { Chain, Party, PayingWallet, carrier, commitment, envelopeRecord, fromNowhere, fundingTree, receiptRecord } from './testmint.js'
@@ -652,4 +652,58 @@ test('acceptance: held and fast lines survive a restart; a lost payment is writt
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('acceptance: flags outlive a restart, restored lines are watched a day and charged an hour, a partial network still broadcasts, the watch is bounded', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bbox-accept-'))
+  try {
+    const chain = new Chain(99500)
+    const w = new PayingWallet(PrivateKey.fromRandom(), chain)
+    const lock = new P2PKH().lock(payee.toAddress()).toHex()
+    writeFileSync(join(dir, 'unsettleable.jsonl'), JSON.stringify({ kind: 'double-spent', txid: 'ab'.repeat(32), payer: '02cd', sats: 5 }) + '\n')
+    const host = new FakeHost()
+    const net = new TestNetwork(chain)
+    const gate = new PaymentGate({ app: 'bbox', host, headers: chain.tracker, policy: defaultAcceptancePolicy(), arcade: net, node: net, stateDir: dir, maxWatched: 2, waitMs: 200, pollMs: 10 })
+    assert.equal(gate.exposure.isFlagged('02cd'), true, 'flagged again from unsettleable.jsonl')
+    const old = await w.pay([{ satoshis: 5, lockingScript: lock }])
+    gate.restore(old, '02ef', 5, Date.now() - 2 * 3_600_000)
+    assert.deepEqual(gate.watching, [old.id('hex')], 'watched: under a day old')
+    assert.equal(gate.exposure.unmined('02ef').payer, 0, 'not charged: past the window')
+    const ancient = await w.pay([{ satoshis: 5, lockingScript: lock }])
+    gate.restore(ancient, '02ef', 5, Date.now() - 2 * 86_400_000)
+    assert.equal(gate.watching.length, 1, 'over a day old: not watched')
+    assert.equal((await gate.accept(await w.pay([{ satoshis: 5, lockingScript: lock }]), '02aa', 5)).decision, 'fast')
+    assert.deepEqual(await gate.accept(await w.pay([{ satoshis: 5, lockingScript: lock }]), '02aa', 5), { decision: 'hold', reason: 'watch-limit', detail: 'too many fast payments are waiting to mine' })
+    // arcade alone: broadcast, and held, since no node can show it mined.
+    const half = new PaymentGate({ app: 'bbox', host: new FakeHost(), headers: chain.tracker, policy: defaultAcceptancePolicy(), arcade: net })
+    const p = await w.pay([{ satoshis: 5, lockingScript: lock }])
+    assert.equal((await half.accept(p, '02aa', 5)).reason, 'no-broadcast-leg')
+    assert.ok(net.sent.includes(p.id('hex')), 'broadcast even so')
+    net.mode = 'reject'
+    assert.equal((await half.accept(await w.pay([{ satoshis: 5, lockingScript: lock }]), '02aa', 5)).decision, 'refuse')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('acceptance: arcade over HTTP: a refusal code refuses, "already known" is no verdict, "already spent" is never accepted', async () => {
+  const replies: Array<[number, string]> = [
+    [465, '{"title":"input already spent"}'],
+    [409, '{"title":"txn-already-known"}'],
+    [400, '{"title":"missing inputs or already spent"}'],
+    [200, '{"txid":"x","txStatus":"SEEN_ON_NETWORK"}'],
+  ]
+  const server = createServer((req, res) => {
+    req.resume()
+    const [status, body] = replies.shift()!
+    res.writeHead(status, { 'content-type': 'application/json' })
+    res.end(body)
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  servers.push(server)
+  const a = new ArcadeHttp(`http://127.0.0.1:${(server.address() as AddressInfo).port}`)
+  await assert.rejects(a.submit(Uint8Array.of(1)), BroadcastRefused)
+  assert.deepEqual(await a.submit(Uint8Array.of(1)), { txStatus: 'RECEIVED', extraInfo: 'already known' })
+  await assert.rejects(a.submit(Uint8Array.of(1)), (e: unknown) => !(e instanceof BroadcastRefused))
+  assert.equal((await a.submit(Uint8Array.of(1))).txStatus, 'SEEN_ON_NETWORK')
 })
