@@ -79,6 +79,11 @@ ignored.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
+| `accept_payer_limit` | the threshold | satoshis one sender may have taken fast and not yet mined (`internalize`); past it a payment waits for its block |
+| `accept_threshold_sats` | 25000000 | the largest payment `internalize` takes on the network's acceptance; above it, it waits for its block |
+| `accept_total_limit` | ten thresholds | the same across every sender |
+| `accept_watch` | `0s` | how long `internalize` watches for a conflict after arcade's acceptance |
+| `accept_window` | `1h` | how long a fast payment counts against the limits unless it mines first |
 | `arcade_key` | none | bearer token for an arcade installation named in `settle` |
 | `asset` | none | the node's asset API base URL: proofs, the chain tip, blocks, raw transactions |
 | `box` | none | the box `send` addresses and `list`, `read` ask about when none is named. None: `send` uses `inbox`, and `list` and `read` ask about every box |
@@ -476,7 +481,7 @@ service ls_bbox, terms 1
 history        5 sat a question
 history-after  5 sat a question
 $ bbox history
-paid 5 sat to 03d4f2a9c1b7 in 0e8f...4c21, recorded by the host for its payee to settle
+paid 5 sat to 03d4f2a9c1b7 in 0e8f...4c21, broadcast by the host for its payee to settle
 2026-01-05T10:02:11Z  8b0e...12fa  from 02c6...9a1e  box inbox  1874B
 1 envelope(s) the host keeps that are no longer open
 ```
@@ -487,8 +492,9 @@ with its price and a derivation prefix (BRC-105); the command pays: one
 output to the key BRC-29 derives for the host's identity key, the prefix
 and a suffix of its own, from the pool, unbroadcast, as Atomic BEEF in the
 `x-bsv-payment` header as output 0, and asks again. The host verifies the payment,
-records it and answers; the host does not broadcast it, and its payee
-settles it (below). A price over `-max-sats`
+records it, broadcasts it, and answers once the network took it (or, for a
+payment over its threshold, once it mines: until then it answers 402
+`ERR_PAYMENT_HELD`); its payee settles it (below). A price over `-max-sats`
 (default 1000) is not paid (exit 2). One payment buys one answer page;
 `-after <created>:<txid>` asks for the next, and `-all` for every page
 from there on.
@@ -526,8 +532,8 @@ settled 0e8f...4c21: 5 sat for history from 03a1b2c3d4e5
 ```
 
 A host records every payment its terms route accepts in `payments.jsonl`
-and does not broadcast it. **Until a payment is settled, its payer can
-spend the same coins elsewhere**, so the payee settles on a schedule.
+and broadcasts it. **Until a payment mines, its payer can race a
+conflicting spend**, so the payee settles on a schedule.
 `payee settle` internalizes each payment the home has not settled, as
 `internalize` does, and records it. One the network refuses for good (its
 payer spent the inputs elsewhere, which the node's view of the inputs

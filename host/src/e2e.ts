@@ -21,13 +21,14 @@
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
-import { createServer, type Server } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AuthFetch, PrivateKey, Transaction, type WalletInterface } from '@bsv/sdk'
 import { LockTime } from '@lightwebinc/bcommon'
+import { TestNetwork, serveNetwork } from './testnetwork.js'
 import { Chain, Party, PayingWallet, carrier, commitment, envelopeRecord, fundingTree, receiptRecord, sweep } from './testmint.js'
 import { beefOf, byName, txVectors } from './testutil.js'
 
@@ -56,16 +57,24 @@ function stage(dir: string): { file: string; root: string } {
 }
 
 /** The chain's headers, served in the reference host's native shape, read at each request. */
-async function headers(chain: Chain): Promise<Server> {
+async function headers(chain: Chain, net: TestNetwork): Promise<Server> {
   const server = createServer((req, res) => {
+    void serveNetwork(net, req, res).then((served) => {
+      if (!served) headersOnly(chain, req, res)
+    })
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  return server
+}
+
+function headersOnly(chain: Chain, req: IncomingMessage, res: ServerResponse): void {
+  {
     const m = /^\/v1\/root\/(\d+)$/.exec(req.url ?? '')
     const tip = Math.max(...chain.roots.keys())
     const body = req.url === '/v1/tip' ? { height: tip } : m !== null && chain.roots.has(Number(m[1])) ? { merkleRoot: chain.roots.get(Number(m[1])) } : undefined
     res.writeHead(body === undefined ? 404 : 200, { 'content-type': 'application/json' })
     res.end(JSON.stringify(body ?? {}))
-  })
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
-  return server
+  }
 }
 
 function docker(...args: string[]): string {
@@ -128,6 +137,8 @@ async function startHost(dir: string, staged: { file: string; root: string }, p:
       BBOX_LISTEN: `127.0.0.1:${p.terms}`,
       BBOX_PRICES: 'history=5,history-after=5',
       BBOX_PAYEE_KEY: payeeKey,
+      BBOX_ARCADE_URL: `http://127.0.0.1:${p.headers}/arcade`,
+      BBOX_ASSET_URL: `http://127.0.0.1:${p.headers}`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -195,7 +206,8 @@ async function main(): Promise<void> {
   const dir = process.argv[2]
   if (dir === undefined) fail('usage: node dist/e2e.js /path/to/reference-host')
   const chain = new Chain(30000, v.headers)
-  const hdr = await headers(chain)
+  const net = new TestNetwork(chain)
+  const hdr = await headers(chain, net)
   const db = await mysql()
   const ports: Ports = { db: db.port, headers: (hdr.address() as AddressInfo).port, host: await freePort(), terms: await freePort() }
   const staged = stage(dir)
@@ -277,7 +289,9 @@ async function main(): Promise<void> {
     expect('history paid through its 402', await paidHistory(bob.hex), { status: 200, paid: '5', txids: [id(winner1)] })
     expect('the golden note, out of the window, is history for its recipient', (await paidHistory(v.recipientIdentityKey)).txids, [byName(v, 'carrier-envelope-note').txid])
     const ledger = join(staged.root, 'state', 'payments.jsonl')
-    expect('both payments are in the ledger', readFileSync(ledger, 'utf8').trim().split('\n').length, 2)
+    const lines = readFileSync(ledger, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { txid: string; decision?: string })
+    expect('both payments are in the ledger, taken fast', lines.map((l) => l.decision), ['fast', 'fast'])
+    expect('the host broadcast both before answering', lines.every((l) => net.sent.includes(l.txid)), true)
 
     // Restart: the index is rebuilt from storage and the outpoint rows.
     await stopHost(host)

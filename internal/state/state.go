@@ -284,6 +284,10 @@ type Received struct {
 	Beef         string `json:"beef,omitempty"`
 	// Acked is the receipt that acknowledges it.
 	Acked string `json:"acked,omitempty"`
+	// Accepted is the payment's txid once it was taken on the network's
+	// acceptance (fast, at or below the threshold) and before it is in the
+	// pool: the next internalize waits for its proof and pools it.
+	Accepted string `json:"accepted,omitempty"`
 }
 
 // ErrNoState is a home with no state file yet.

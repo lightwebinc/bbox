@@ -27,6 +27,19 @@
  *                         answers, and at once; default 4 and 8 (budget.ts)
  *   BBOX_HANDSHAKES_PER_ADDR_PER_SEC, BBOX_HANDSHAKE_ADDR_BURST
  *                         the same for one remote address; default 1 and 4
+ *   BBOX_ARCADE_URL       arcade, which the host broadcasts payments through
+ *   BBOX_ASSET_URL        the node's asset service: spend view and proofs;
+ *                         without both, every payment is held until mined
+ *   BBOX_ACCEPT_THRESHOLD_SATS
+ *                         the largest payment answered on network acceptance;
+ *                         default 25000000; above it, held until mined
+ *   BBOX_ACCEPT_PAYER_LIMIT, BBOX_ACCEPT_TOTAL_LIMIT
+ *                         satoshis taken fast and not yet mined, per payer
+ *                         and in all; default one and ten thresholds
+ *   BBOX_ACCEPT_WINDOW    how long a fast payment counts against the limits
+ *                         unless it mines first; default 1h
+ *   BBOX_ACCEPT_WATCH     how long to watch for a conflict before answering;
+ *                         default 0s
  *   BBOX_RESPONSES_PER_SEC, BBOX_RESPONSE_BURST
  *                         the signed responses a second one BRC-104 session
  *                         is given, and at once; default 5 and 20
@@ -36,9 +49,11 @@
  * anything. Every mistake throws, and the host refuses to start.
  */
 import { isAbsolute } from 'node:path'
+import { Transaction, Utils } from '@bsv/sdk'
 import type { Server } from 'node:http'
 import { PrivateKey, ProtoWallet } from '@bsv/sdk'
 import type { Module, ModuleHost } from '@lightwebinc/bcommon'
+import { gateFor, parseAcceptConfig, type AcceptConfig } from './accept.js'
 import { DefaultMaxBEEF } from './beef.js'
 import { DefaultBudget, DefaultResponseBudget, type BudgetConfig, type ResponseBudgetConfig } from './budget.js'
 import { LookupService, TopicPrefix, checkOffice, topic } from './boxrec.js'
@@ -56,6 +71,8 @@ declare const BBOX_BUILD: string | undefined
 
 /** How often retention runs, seconds. */
 const PruneEvery = 3600
+/** How often the background tick runs (payment watch; retention every PruneEvery), seconds. */
+const TickEvery = 30
 
 export interface Config {
   offices: string[]
@@ -69,6 +86,8 @@ export interface Config {
   sessions: { max: number; ttlSeconds: number }
   handshakes: BudgetConfig
   responses: ResponseBudgetConfig
+  /** Payment acceptance; bcommon's DefaultPolicy with no arcade or node (every payment held) when unset. */
+  accept?: AcceptConfig
 }
 
 /** Parses BBOX_OFFICES. Throws on anything it cannot take exactly. */
@@ -130,6 +149,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
       perSec: rate('BBOX_RESPONSES_PER_SEC', env['BBOX_RESPONSES_PER_SEC'], DefaultResponseBudget.perSec),
       burst: integer('BBOX_RESPONSE_BURST', env['BBOX_RESPONSE_BURST'], DefaultResponseBudget.burst, 1),
     },
+    accept: parseAcceptConfig('BBOX', env),
   }
   const listen = env['BBOX_LISTEN']?.trim()
   if (listen !== undefined && listen !== '') {
@@ -178,7 +198,6 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
   for (const why of ['cap', 'idle']) host.metrics.preset('bbox_sessions_evicted_total', { why })
   for (const reason of Reasons) host.metrics.preset('bbox_refused_total', { reason })
   for (const why of ['evidence', 'retention']) host.metrics.preset('bbox_dropped_total', { why })
-  for (const result of ['requested', 'accepted', 'refused', 'replayed']) host.metrics.preset('bbox_payments_total', { result })
   host.metrics.preset('bbox_retractions_total')
   const priced = new Set([...c.prices].filter(([, p]) => p > 0).map(([name]) => name))
   const ls = new BboxLookupService({
@@ -197,24 +216,48 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
   const topics: Record<string, BboxTopicManager> = {}
   for (const office of c.offices) topics[topic(office)] = new BboxTopicManager(topic(office), host, undefined, c.maxBEEF)
   let front: LookupFront | undefined
+  const headers = c.headersURL === undefined ? undefined : new HeaderTracker(c.headersURL)
+  const accept = c.accept ?? parseAcceptConfig('BBOX', {})
+  const receiver = c.listen !== undefined && priced.size > 0 ? new LedgerReceiver(c.stateDir) : undefined
+  const gate = receiver !== undefined && headers !== undefined ? gateFor('bbox', host, headers, accept, c.stateDir) : undefined
+  if (gate !== undefined && receiver !== undefined) {
+    for (const f of receiver.fast) {
+      try {
+        gate.restore(Transaction.fromAtomicBEEF(Utils.toArray(f.beef, 'base64')), f.senderIdentityKey, f.satoshis, f.at)
+      } catch {
+        // a line whose BEEF does not parse was never answered fast
+      }
+    }
+  }
   if (c.listen !== undefined) {
     front = new LookupFront({
       ls,
       host,
       prices: c.prices,
       wallet: c.payeeKey === undefined ? undefined : new ProtoWallet(c.payeeKey),
-      receiver: priced.size > 0 ? new LedgerReceiver(c.stateDir) : undefined,
-      headers: c.headersURL === undefined ? undefined : new HeaderTracker(c.headersURL),
+      receiver,
+      headers,
+      gate,
       sessions: c.sessions,
       budget: c.handshakes,
       responses: c.responses,
     })
   }
   const start = async (): Promise<Server | undefined> => {
+    let pruned = Date.now()
+    let sweeping = false
     const timer = setInterval(() => {
-      if (!ls.restored) return
+      if (gate !== undefined && !sweeping) {
+        sweeping = true
+        gate
+          .sweep()
+          .catch((e: unknown) => host.log('bbox payment watch failed', { err: String(e) }))
+          .finally(() => (sweeping = false))
+      }
+      if (!ls.restored || Date.now() - pruned < PruneEvery * 1000) return
+      pruned = Date.now()
       ls.prune().catch((e: unknown) => host.log('ls_bbox retention failed', { err: String(e) }))
-    }, PruneEvery * 1000)
+    }, TickEvery * 1000)
     timer.unref()
     if (front === undefined || c.listen === undefined) return undefined
     const server = await front.listen(c.listen.port, c.listen.host)
@@ -230,6 +273,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
     sessions: c.listen === undefined ? 'none' : `${c.sessions.max}, idle ${c.sessions.ttlSeconds}s`,
     handshakes: c.listen === undefined ? 'none' : `${c.handshakes.perSec}/s burst ${c.handshakes.burst}, per address ${c.handshakes.perAddressPerSec}/s burst ${c.handshakes.addressBurst}`,
     responses: c.listen === undefined ? 'none' : `${c.responses.perSec}/s burst ${c.responses.burst} a session`,
+    payments: gate === undefined ? 'none' : gate.networked ? `fast to ${accept.policy.thresholdSats} sat, payer ${accept.policy.payerLimit}, total ${accept.policy.totalLimit}` : 'held until mined (no arcade or asset URL)',
     build,
   })
   return { module: { topics, lookups: { [LookupService]: ls } }, ls, front, start }

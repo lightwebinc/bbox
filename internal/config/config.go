@@ -19,12 +19,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lightwebinc/bcommon/acceptance"
+
 	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/limits"
 )
 
 // Config is the resolved settings.
 type Config struct {
+	// AcceptPayerLimit and AcceptTotalLimit bound the satoshis taken on
+	// the fast path and not yet mined, per payer and in all; zero is one
+	// and ten thresholds. AcceptThresholdSats is the largest payment taken
+	// on the network's acceptance; above it a payment waits for its block.
+	// AcceptWatch is how long to watch for a conflict before taking one
+	// fast, and AcceptWindow how long one counts against the limits unless
+	// it mines first (bcommon acceptance.Policy).
+	AcceptPayerLimit    uint64
+	AcceptThresholdSats uint64
+	AcceptTotalLimit    uint64
+	AcceptWatch         time.Duration
+	AcceptWindow        time.Duration
 	// ArcadeKey is the bearer token for an arcade installation in Settle.
 	ArcadeKey string
 	// Asset is the node's asset API base URL: proofs, the chain tip, blocks
@@ -89,6 +103,20 @@ const (
 	QuorumOne      = "one"
 )
 
+// AcceptPolicy is the payment acceptance rule the settings name.
+func (c Config) AcceptPolicy() acceptance.Policy {
+	p := acceptance.DefaultPolicy()
+	p.ThresholdSats, p.Window, p.Watch = c.AcceptThresholdSats, c.AcceptWindow, c.AcceptWatch
+	p.PayerLimit, p.TotalLimit = c.AcceptPayerLimit, c.AcceptTotalLimit
+	if p.PayerLimit == 0 {
+		p.PayerLimit = p.ThresholdSats
+	}
+	if p.TotalLimit == 0 {
+		p.TotalLimit = acceptance.DefaultTotalFactor * p.ThresholdSats
+	}
+	return p
+}
+
 // Need is how many of n hosts the quorum q requires. A number above n is an
 // error: a quorum no host set can meet would refuse every publish.
 func Need(q string, n int) (int, error) {
@@ -124,23 +152,25 @@ func DefaultHome() string {
 // Defaults are the built-in values for the keys that have one.
 func Defaults() Config {
 	return Config{
-		Home:        DefaultHome(),
-		Mode:        ModePlane,
-		Network:     "main",
-		ObjectBound: limits.DefaultObjectBound,
-		Originator:  "bbox",
-		Quorum:      QuorumAll,
-		RPCPass:     "bitcoin",
-		RPCUser:     "bitcoin",
-		Timeout:     limits.DefaultTimeout,
-		TreeCount:   limits.DefaultTreeCount,
+		AcceptThresholdSats: acceptance.DefaultThresholdSats,
+		AcceptWindow:        acceptance.DefaultWindow,
+		Home:                DefaultHome(),
+		Mode:                ModePlane,
+		Network:             "main",
+		ObjectBound:         limits.DefaultObjectBound,
+		Originator:          "bbox",
+		Quorum:              QuorumAll,
+		RPCPass:             "bitcoin",
+		RPCUser:             "bitcoin",
+		Timeout:             limits.DefaultTimeout,
+		TreeCount:           limits.DefaultTreeCount,
 	}
 }
 
 // Keys is the file grammar's key list, in lexicographic order. A key not in
 // it is an error: a misspelt key that was silently ignored would leave a
 // setting at its default with no sign that the file was ever read.
-var Keys = []string{"arcade_key", "asset", "box", "facade", "header_url", "history_host", "home", "hosts", "mode", "network", "object_bound", "office", "originator", "quorum", "rpc", "rpc_pass", "rpc_user", "settle", "timeout", "tree_count"}
+var Keys = []string{"accept_payer_limit", "accept_threshold_sats", "accept_total_limit", "accept_watch", "accept_window", "arcade_key", "asset", "box", "facade", "header_url", "history_host", "home", "hosts", "mode", "network", "object_bound", "office", "originator", "quorum", "rpc", "rpc_pass", "rpc_user", "settle", "timeout", "tree_count"}
 
 // ErrUnknownKey reports a key the grammar does not define.
 var ErrUnknownKey = errors.New("config: unknown key")
@@ -229,6 +259,29 @@ func (c Config) Apply(vals map[string]string) (Config, error) {
 			continue
 		}
 		switch k {
+		case "accept_payer_limit", "accept_threshold_sats", "accept_total_limit":
+			n, err := strconv.ParseUint(v, 10, 64)
+			if err != nil {
+				return c, fmt.Errorf("config: %s %q is not a whole number of satoshis", k, v)
+			}
+			switch k {
+			case "accept_payer_limit":
+				c.AcceptPayerLimit = n
+			case "accept_threshold_sats":
+				c.AcceptThresholdSats = n
+			default:
+				c.AcceptTotalLimit = n
+			}
+		case "accept_watch", "accept_window":
+			d, err := time.ParseDuration(v)
+			if err != nil || d < 0 {
+				return c, fmt.Errorf("config: %s %q is not a duration", k, v)
+			}
+			if k == "accept_watch" {
+				c.AcceptWatch = d
+			} else {
+				c.AcceptWindow = d
+			}
 		case "arcade_key":
 			c.ArcadeKey = v
 		case "asset":

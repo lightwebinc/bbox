@@ -35,6 +35,8 @@ $ make docker-build-host REFERENCE_HOST_IMAGE=<reference overlay host image>
 
 The host must run with no broadcaster: a carrier is a record, never a
 transaction for the chain (spec section 8.1). The reference host has none.
+The module's own arcade (`BBOX_ARCADE_URL`) carries payments only, never a
+carrier.
 
 ## Configuration
 
@@ -56,6 +58,13 @@ transaction for the chain (spec section 8.1). The reference host has none.
 | `BBOX_HANDSHAKE_ADDR_BURST` | 4 | the most handshakes one remote address is answered at once |
 | `BBOX_RESPONSES_PER_SEC` | 5 | signed responses a second one BRC-104 session is given; decimals allowed |
 | `BBOX_RESPONSE_BURST` | 20 | the most signed responses one session is given at once |
+| `BBOX_ARCADE_URL` | none | arcade, which the host broadcasts each payment through before it answers (`POST /tx`, `GET /tx/<txid>`) |
+| `BBOX_ASSET_URL` | none | the node's asset service: the spend view of a payment's inputs and the proof of a held or watched payment. Without both URLs every payment is held until it mines |
+| `BBOX_ACCEPT_THRESHOLD_SATS` | 25000000 | the largest payment answered on the network's acceptance; above it a payment is held until it mines |
+| `BBOX_ACCEPT_PAYER_LIMIT` | the threshold | satoshis one payer may have answered fast and not yet mined; past it, held |
+| `BBOX_ACCEPT_TOTAL_LIMIT` | ten thresholds | the same across every payer |
+| `BBOX_ACCEPT_WINDOW` | `1h` | how long a fast payment counts against the limits unless it mines first (`ms`, `s`, `m`, `h`) |
+| `BBOX_ACCEPT_WATCH` | `0s` | how long the host keeps watching for a conflict after arcade's acceptance before it answers |
 
 A price needs `BBOX_LISTEN`, `BBOX_PAYEE_KEY` and a header source.
 `history` and `history-after` sell one walk, so a host that prices one and
@@ -74,8 +83,12 @@ port opens.
 - `payments.jsonl` holds every payment the terms route accepted: the Atomic
   BEEF, the derivation prefix and suffix, the sender's identity key, the
   satoshis, the class and the outpoints it spends. The route answers once
-  the line is on disk. It does not broadcast the payment: see
+  the line is on disk, and each line carries what the host decided
+  ([Payment acceptance](#payment-acceptance)). The host broadcasts the
+  payment; the payee still settles it: see
   [Settling payments](#settling-payments).
+- `unsettleable.jsonl` holds each fast payment the watch found lost
+  (double-spent, refused, or never mined), one JSON line each.
 
 The module holds every carrier line of `outpoints.jsonl` in memory for the
 host's life, and nothing bounds it: about 1 KB of memory and 400 bytes of
@@ -150,9 +163,9 @@ signed by the payee's identity key; with one, it is answered once output 0
 of the payment pays at least the price, P2PKH, to the key BRC-29 derives for
 the prefix, the suffix and the asker, the prefix is one this route issued,
 the payment verifies against the host's headers, its txid was never used
-before, and it spends no coin an accepted payment spent. A payment is
-unbroadcast when it is offered, so two transactions spending one coin both
-verify and at most one can ever be mined: the second is refused 409
+before, it spends no coin an accepted payment spent, and it passes
+[payment acceptance](#payment-acceptance). Two transactions spending one
+coin can both verify and at most one can ever be mined: the second is refused 409
 `ERR_PAYMENT_CONFLICT`, as a used txid is refused 409
 `ERR_PAYMENT_REPLAYED`. The coins of every accepted payment are kept in
 `payments.jsonl` and refused again after a restart. One payment buys one
@@ -214,14 +227,57 @@ last 65536 requests it verified; the session's budget bounds what an older
 replay can cost. `bbox_requests_total{result}` counts both refusals:
 `replayed`, `limited`.
 
+
+## Payment acceptance
+
+A paid question is answered only after the payment is held to bcommon's
+acceptance rule (package `acceptance`, the same rule for every layer):
+
+1. the route's own checks (prefix, output 0 pays the derived key, SPV
+   against the host's headers, a txid and coins never used before);
+2. finality (lock time 0, or every input final) and conservation (every
+   input carries its source, and the outputs do not exceed the inputs);
+3. the value: at or below `BBOX_ACCEPT_THRESHOLD_SATS`, and within the
+   payer's and the total limits, it is fast; otherwise it is held;
+4. the host broadcasts it through `BBOX_ARCADE_URL`, unmined ancestors first,
+   held or fast: this is how the payee collects;
+5. on the fast path the host answers only once arcade reports the network
+   took it (`SEEN_ON_NETWORK`, `ACCEPTED_BY_NETWORK`, ...), with no
+   `DOUBLE_SPEND_ATTEMPTED` and no competing transaction, and the node shows
+   every input unspent or spent by this payment.
+
+A refusal (arcade `REJECTED`, a definitive HTTP refusal, an input spent by
+another transaction, a payment that is not final or spends more than it
+holds) is answered 400 `ERR_PAYMENT_REFUSED`. Anything else that is not
+fast (above the threshold, a limit reached, a conflict reported, no
+verdict within 10 s, a spend view that cannot say) is answered 402
+`ERR_PAYMENT_HELD` with the reason and no BRC-105 headers, so a client
+does not pay again. The held payment is recorded in `payments.jsonl` with
+`"decision":"hold"`, keeps its coins, and the same payment sent again is
+answered once the node serves its proof and that proof verifies against the
+host's headers. A host with no arcade or no node holds every payment.
+
+Every fast payment is watched on the host's background tick (every 30 s)
+until it mines. One whose input another transaction spent, that arcade
+refuses, or that has not mined within a day, is written to
+`unsettleable.jsonl` in the state directory, logged, and counted; its payer
+is then held for confirmation on every later payment until the host
+restarts. Nothing is clawed back: the answer was given. A restart watches
+the fast lines of the last window again.
+
+The ledger line carries `decision` (`fast`, `hold` or `mined`) and
+`reason`; `bbox payee settle` reads it as before.
+
 ## Settling payments
 
 A payment the terms route accepts is a BRC-29 output to a key derived from
 `BBOX_PAYEE_KEY`, verified against the host's headers and recorded in
-`payments.jsonl` before the question is answered. The host never broadcasts
-it. **Until it is settled, the payer can still spend the same coins
-elsewhere, and the payment is then worth nothing**: a payment is money only
-once it is broadcast and mined. Settle promptly and on a schedule.
+`payments.jsonl` before the question is answered. The host broadcasts it
+and, on the fast path, answers once the network took it
+([Payment acceptance](#payment-acceptance)). **Until it mines, the payer
+can still race a conflicting spend to a miner, and the payment is then
+worth nothing**: a payment is money only once it is mined and in the
+payee's pool. Settle promptly and on a schedule.
 
 Settling is the payee wallet's `internalizeAction` (BRC-100, protocol
 `wallet payment`, output 0, the remittance as written), which broadcasts
@@ -271,7 +327,7 @@ refused and every later run counts it in `refused (N before)` without
 trying it again, so a timer does not fail on it forever. Nothing recovers
 it: the question it paid for was answered and the payee has nothing. That
 is the price of the window between answering and settling, and why the
-window should be short. The host's own `bbox_payments_total{result="accepted"}`
+window should be short. The host's own `bbox_payments_total{decision="fast"}`
 counted it when it answered, so accepted minus settled is what the payee
 lost or has still to settle.
 
@@ -320,7 +376,9 @@ one topic leaves it answering in the others.
 | `bbox_dropped_total` | `why` | carriers and sweeps dropped: `evidence`, `retention` |
 | `bbox_retractions_total` | | outpoints recorded as swept, the fee input of each sweep included (a sweep of one funding output counts 2) |
 | `bbox_lookups_total` | `class` | questions answered |
-| `bbox_payments_total` | `result` | `requested` (a 402), `accepted`, `refused`, `replayed` (a txid used before, or a coin an accepted payment spent) |
+| `bbox_payments_total` | `decision`, `reason` | paid questions by what the host did: `requested` (`no-payment`, a 402 with the price); `fast` (`at-or-below-threshold`, `mined`); `hold` (`above-threshold`, `payer-limit`, `total-limit`, `payer-flagged`, `no-broadcast-leg`, `broadcast-unconfirmed`, `no-network-verdict`, `double-spend-attempted`, `spend-view-unknown`); `refuse` (`malformed`, `wrong-script`, `spv-failed`, `not-final`, `outputs-exceed-inputs`, `network-refused`, `double-spent`, `replayed`, `conflict`) |
+| `bbox_payment_events_total` | `kind` | fast payments the watch resolved: `confirmed`, `double-spent`, `refused`, `unmined` (all but the first flag the payer) |
+| `bbox_payments_unmined` | | fast payments being watched |
 | `bbox_requests_total` | `result` | authenticated requests refused before any signature: `replayed`, `limited` (over the session's budget, answered 429) |
 | `bbox_sessions` | | BRC-104 sessions the terms route keeps |
 | `bbox_sessions_evicted_total` | `why` | sessions forgotten: `cap`, `idle` |

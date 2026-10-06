@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
@@ -964,5 +965,47 @@ func TestOneTreeMintedAheadAcrossRuns(t *testing.T) {
 	h.send("alice", bob, "n9", "-tree-count", "8")
 	if n := ahead(); n != 0 {
 		t.Fatalf("after switching: %d tree(s) still minted ahead", n)
+	}
+}
+
+// A small payment through an arcade leg is received on the network's
+// acceptance: acknowledged before it mines, and pooled by the next
+// internalize once it has. Above accept_threshold_sats it waits for its
+// block as before.
+func TestInternalizeFastAtOrBelowThreshold(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	h.env["BBOX_SETTLE"] = "arcade:" + h.chainS.URL + "/arcade"
+	tx := h.send("alice", bob, "small", "-pay", "5000")
+	h.must("bob", "", "read", tx)
+	// Only the payment waits for a block; the receipt's funding does not.
+	h.chain.SetHoldIf(func(t *transaction.Transaction) bool {
+		return slices.ContainsFunc(t.Outputs, func(o *transaction.TransactionOutput) bool { return o.Satoshis == 5000 })
+	})
+	r := h.must("bob", "", "internalize", tx)
+	if !strings.Contains(r.stdout, "received 5000 sat from") || !strings.Contains(r.stdout, "taken on the network's acceptance") || !strings.Contains(r.stdout, "acknowledged "+tx) {
+		t.Fatalf("internalize fast:\n%s\n%s", r.stdout, r.stderr)
+	}
+	pay := regexp.MustCompile(`payment ([0-9a-f]{64}), taken`).FindStringSubmatch(r.stdout)[1]
+	if h.chain.Tx(pay) == nil || h.chain.Mined(pay) {
+		t.Fatal("the payment should be broadcast and not yet mined")
+	}
+	h.chain.SetHoldIf(nil)
+	h.chain.Mine()
+	r = h.must("bob", "", "internalize", tx)
+	if !strings.Contains(r.stdout, "internalized 5000 sat from") || strings.Contains(r.stdout, "acknowledged") {
+		t.Fatalf("internalize after mining:\n%s\n%s", r.stdout, r.stderr)
+	}
+
+	// Above the threshold: held for its block.
+	h.env["BBOX_ACCEPT_THRESHOLD_SATS"] = "1000"
+	tx2 := h.send("alice", bob, "large", "-pay", "3000")
+	h.must("bob", "", "read", tx2)
+	r = h.must("bob", "", "internalize", tx2)
+	if !strings.Contains(r.stderr, "above-threshold") || !strings.Contains(r.stdout, "internalized 3000 sat from") {
+		t.Fatalf("internalize held:\n%s\n%s", r.stdout, r.stderr)
 	}
 }

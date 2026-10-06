@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker"
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
+	"github.com/lightwebinc/bcommon/acceptance"
 	"github.com/lightwebinc/bcommon/bwallet"
 	"github.com/lightwebinc/bcommon/funding"
 	"github.com/lightwebinc/bcommon/guard"
@@ -438,11 +440,16 @@ const internalizeHelp = `usage: bbox internalize <txid> [-no-ack] [-office OFFIC
 Take the payment inside an envelope to this identity into the wallet. The
 envelope is fetched and checked again, and the payment checked in the order
 of spec section 4.7, at this moment: it is taken only while it is more than
-an hour before the envelope expires. The wallet broadcasts it through the
-settlement leg, waits for its proof, and adds its outputs to the pool, so
-it is spendable. The envelope is then acknowledged with a receipt, unless
--no-ack. A payment whose inputs the sender spent elsewhere is refused by
-the network and reported as reclaimed.`
+an hour before the envelope expires. It is then broadcast through the
+settlement leg. A payment at or below accept_threshold_sats, within the
+sender's and the total limits, is received as soon as arcade says the
+network took it and the node shows its inputs spent by it alone: the
+envelope is acknowledged at once, and the next internalize of the same
+txid waits for its proof and adds it to the pool. A larger payment, or one
+the network has not clearly taken, waits for its proof first, as before.
+The envelope is acknowledged with a receipt, unless -no-ack. A payment
+whose inputs the sender spent elsewhere is refused by the network and
+reported as reclaimed.`
 
 func cmdInternalize(ctx context.Context, g *global, args []string) error {
 	fs := g.flagSet("internalize", internalizeHelp)
@@ -517,6 +524,29 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 	if err != nil {
 		return refused("%v", err)
 	}
+	rec := h.st.Remember(state.Received{Txid: it.Txid, Office: e.Office, From: hex.EncodeToString(e.From), Box: e.Box, Created: e.Created, Expires: e.Expires, Paid: m.Paid()})
+	if rec.Accepted == "" {
+		v, err := g.acceptPayment(ctx, p, rd.Headers, m.Payment, hex.EncodeToString(e.From), ia)
+		if err != nil {
+			return err
+		}
+		switch v.Decision {
+		case acceptance.Refuse:
+			return refused("%s: the payment is refused: %s", pos[0], v)
+		case acceptance.Fast:
+			rec.Accepted = m.Payment.TxID().String()
+			if rec.Beef == "" {
+				rec.Beef = hex.EncodeToString(it.Beef)
+			}
+			if err := h.st.Save(); err != nil {
+				return err
+			}
+			fmt.Fprintf(g.stdout, "received %d sat from %s: payment %s, taken on the network's acceptance (%s); run bbox internalize %s again once it is mined to add it to the pool\n",
+				m.Paid(), hex.EncodeToString(e.From), rec.Accepted, v.Reason, it.Txid)
+			return g.ackInternalized(ctx, h, *noAck, rec, e.Office, it.Txid)
+		}
+		g.say("payment %s: %s; waiting for its block", m.Payment.TxID(), v)
+	}
 	if _, err := p.InternalizeAction(ctx, ia, g.cfg.Originator); err != nil {
 		var re *purse.RefusedError
 		if errors.As(err, &re) || strings.Contains(err.Error(), "spent its inputs") {
@@ -524,27 +554,52 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 		}
 		return payWords(err, 0)
 	}
-	rec := h.st.Remember(state.Received{Txid: it.Txid, Office: e.Office, From: hex.EncodeToString(e.From), Box: e.Box, Created: e.Created, Expires: e.Expires, Paid: m.Paid()})
 	rec.Internalized, rec.Beef = m.Payment.TxID().String(), ""
 	if err := h.st.Save(); err != nil {
 		return err
 	}
 	fmt.Fprintf(g.stdout, "internalized %d sat from %s: payment %s, pool %d output(s), %d sat\n",
 		m.Paid(), hex.EncodeToString(e.From), rec.Internalized, h.e.Pool.Count(), h.e.Pool.Balance())
-	if *noAck || rec.Acked != "" {
+	return g.ackInternalized(ctx, h, *noAck, rec, e.Office, it.Txid)
+}
+
+// acceptPayment holds a payment to bcommon's acceptance rule before it is
+// taken: checked (outputs, finality, no more out than in, SPV), broadcast,
+// and decided on value, arcade's verdict and the node's spend view. With
+// no arcade settlement leg or no node every payment is held for its block.
+func (g *global) acceptPayment(ctx context.Context, p *purse.Purse, hc chaintracker.ChainTracker, tx *transaction.Transaction, from string, ia wallet.InternalizeActionArgs) (acceptance.Verdict, error) {
+	pays := make([]acceptance.Output, 0, len(ia.Outputs))
+	for _, o := range ia.Outputs {
+		if int(o.OutputIndex) >= len(tx.Outputs) {
+			return acceptance.Verdict{Decision: acceptance.Refuse, Reason: acceptance.ReasonMalformed}, nil
+		}
+		out := tx.Outputs[o.OutputIndex]
+		pays = append(pays, acceptance.Output{Vout: o.OutputIndex, Script: *out.LockingScript, Sats: out.Satoshis})
+	}
+	v := &acceptance.Verifier{Policy: g.cfg.AcceptPolicy(), Exposure: acceptance.NewExposure(), Headers: hc}
+	if _, arc, err := g.settler(); err == nil && arc != nil && p.Asset != nil {
+		v.Settler, v.Status, v.Spends, v.Proofs = arc, []acceptance.StatusSource{arc}, p.Asset, p.Asset
+	}
+	return v.Accept(ctx, acceptance.Payment{Tx: tx, Payer: from, Pays: pays})
+}
+
+// ackInternalized acknowledges an envelope whose payment was taken, unless
+// -no-ack or it is acknowledged already.
+func (g *global) ackInternalized(ctx context.Context, h *home, noAck bool, rec *state.Received, office, txid string) error {
+	if noAck || rec.Acked != "" {
 		return nil
 	}
 	// A recipient that internalizes a payment acknowledges its envelope.
 	eng, err := g.engine(ctx, h, g.cfg.TreeCount)
 	if err != nil {
-		return fmt.Errorf("the payment is internalized; acknowledging the envelope: %w (bbox ack %s)", err, it.Txid)
+		return fmt.Errorf("the payment is taken; acknowledging the envelope: %w (bbox ack %s)", err, txid)
 	}
 	defer func() { _ = eng.Close(context.WithoutCancel(ctx)) }()
-	rc, err := eng.Receipt(ctx, e.Office, []string{it.Txid})
+	rc, err := eng.Receipt(ctx, office, []string{txid})
 	if err != nil {
-		return fmt.Errorf("the payment is internalized; acknowledging the envelope: %w", err)
+		return fmt.Errorf("the payment is taken; acknowledging the envelope: %w", err)
 	}
-	fmt.Fprintf(g.stdout, "acknowledged %s with receipt %s\n", it.Txid, rc.Txid)
+	fmt.Fprintf(g.stdout, "acknowledged %s with receipt %s\n", txid, rc.Txid)
 	g.tallies(eng)
 	return nil
 }
@@ -559,6 +614,9 @@ type limitWatch struct {
 	mu   sync.Mutex
 	hit  bool
 	wait time.Duration
+	// held is the host's word when it held a payment for confirmation
+	// (402 ERR_PAYMENT_HELD, which carries no BRC-105 headers).
+	held string
 }
 
 // The wait a host names is taken, within these bounds.
@@ -569,6 +627,17 @@ const (
 
 func (w *limitWatch) RoundTrip(r *http.Request) (*http.Response, error) {
 	resp, err := w.next.RoundTrip(r)
+	if err == nil && resp.StatusCode == http.StatusPaymentRequired && resp.Header.Get("x-bsv-payment-version") == "" {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		var e struct{ Code, Description string }
+		if json.Unmarshal(body, &e) == nil && e.Code == "ERR_PAYMENT_HELD" {
+			w.mu.Lock()
+			w.held = e.Description
+			w.mu.Unlock()
+		}
+	}
 	if err != nil || resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("x-bsv-auth-version") != "" || strings.HasSuffix(r.URL.Path, "/.well-known/auth") {
 		return resp, err
 	}
@@ -589,6 +658,13 @@ func (w *limitWatch) taken() (time.Duration, bool) {
 	hit := w.hit
 	w.hit = false
 	return w.wait, hit
+}
+
+// heldWhy is the host's word on a payment it held, or "".
+func (w *limitWatch) heldWhy() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.held
 }
 
 // errLimited is a request refused for its session's budget twice.
@@ -754,7 +830,7 @@ func (g *global) ask(ctx context.Context, h *home, hc chaintracker.ChainTracker,
 	case answered && paid != "":
 		// The host recorded it, unbroadcast, and its payee broadcasts it
 		// when it settles: the change is held until then.
-		fmt.Fprintf(g.stdout, "paid %s sat to %s in %s, recorded by the host for its payee to settle\n", termsafe.Abbrev(paid), termsafe.Abbrev(payee), once.tx.TxID())
+		fmt.Fprintf(g.stdout, "paid %s sat to %s in %s, broadcast by the host for its payee to settle\n", termsafe.Abbrev(paid), termsafe.Abbrev(payee), once.tx.TxID())
 	default:
 		// A payment was handed to the host and the host did not answer for
 		// it. Its coins are NOT given back to the pool: the host holds a
@@ -766,6 +842,8 @@ func (g *global) ask(ctx context.Context, h *home, hc chaintracker.ChainTracker,
 		g.broadcastPayment(ctx, p, once.tx)
 	}
 	switch {
+	case once.tx != nil && watch.heldWhy() != "":
+		return nil, once.sats, incomplete("history at %s: the host broadcast payment %s and holds it for confirmation: %s", base, once.tx.TxID(), termsafe.Abbrev(watch.heldWhy()))
 	case errors.Is(ferr, errLimited) && once.tx != nil:
 		return nil, once.sats, incomplete("history at %s: the host refused the paid request for its session's budget (429); nothing is asked again, since that would take a second payment; ask again later", base)
 	case errors.Is(ferr, errLimited):

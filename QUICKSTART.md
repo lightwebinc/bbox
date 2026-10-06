@@ -142,7 +142,7 @@ service ls_bbox, terms 1
 history        5 sat a question
 history-after  5 sat a question
 $ as bob history
-paid 5 sat to 03d4f2a9c1b7 in 0e8f…4c21, recorded by the host for its payee to settle
+paid 5 sat to 03d4f2a9c1b7 in 0e8f…4c21, broadcast by the host for its payee to settle
 2026-01-05T10:02:11Z  8b0e…12fa  from 02c6…9a1e  box inbox  1874B
 ...
 $ as payee payee settle /var/lib/bbox-a/payments.jsonl

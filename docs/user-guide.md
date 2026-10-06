@@ -186,8 +186,13 @@ acknowledged 3f9a...c410 with receipt 5a0c...9d12
 
 The payment is a BRC-29 transaction to a key derived for you, sealed inside
 the encrypted message. The sender never broadcasts it; nobody but you can
-see it. `internalize` checks it, broadcasts it, waits for it to mine, puts
-it in your pool and acknowledges the envelope. Take it promptly: until it
+see it. `internalize` checks it and broadcasts it. With an arcade
+settlement leg and a payment at or below `accept_threshold_sats` (25,000,000
+sat by default), it is received as soon as the network takes it and the
+node shows no other spend of its inputs: the envelope is acknowledged at
+once, and running `internalize` again after it mines puts it in your pool.
+A larger payment waits for its block, then goes into your pool, and the
+envelope is acknowledged. Take it promptly: until it
 mines, the sender can still spend the coin elsewhere, and is entitled to
 an hour after `expires` (one day by default). A payment the sender
 double-spent is reported as reclaimed or double-spent (exit 1).
@@ -204,7 +209,7 @@ service ls_bbox, terms 1
 history        5 sat a question
 history-after  5 sat a question
 $ bbox history
-paid 5 sat to 03d4f2a9c1b7 in 0e8f...4c21, recorded by the host for its payee to settle
+paid 5 sat to 03d4f2a9c1b7 in 0e8f...4c21, broadcast by the host for its payee to settle
 ```
 
 `history` speaks BRC-104 to the host's terms route (`history_host`), is
@@ -265,9 +270,10 @@ by a lookup, since a duplicate and a refusal look the same.
 ## 12. Being paid: the payee
 
 A host that prices a question records each payment in its
-`payments.jsonl` and does not broadcast it. **Until it is settled, the
-payer can spend the same coins elsewhere.** The payee settles on a
-schedule:
+`payments.jsonl` and broadcasts it. A small payment is answered once the
+network took it, a large one (over 25,000,000 sat by default) only once it
+mines. **Until it mines, the payer can still race a conflicting spend.**
+The payee settles on a schedule:
 
 ```console
 $ bbox -home /srv/payee payee settle /var/lib/bbox/payments.jsonl
