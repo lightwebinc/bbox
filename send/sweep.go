@@ -102,8 +102,7 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 		payer.GiveBack()
 		return nil, err
 	}
-	tx, err := carrier.Sweep(ctx, e.Signer, e.Signer.Originator, Params, tree, vouts, fee.Tx, fee.Vout, fee.Unlocker, change,
-		e.Opts.Fees.SatPerByte, e.Opts.Fees.Floor)
+	tx, err := carrier.SweepAt(ctx, e.Signer, e.Signer.Originator, Params, tree, vouts, fee.Tx, fee.Vout, fee.Unlocker, change, e.Opts.Fees)
 	if err != nil {
 		payer.GiveBack()
 		return nil, err

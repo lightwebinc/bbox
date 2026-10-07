@@ -352,3 +352,65 @@ func (l lost) Submit(ctx context.Context, tx *transaction.Transaction) error {
 	}
 	return errors.New("the answer was lost")
 }
+
+// chainOnly is a chain view that is nothing but nodeapi.Chain: a
+// WhatsOnChain view, or anything else an application holds, with no node's
+// asset API behind it to be found by a type assertion.
+type chainOnly struct{ nodeapi.Chain }
+
+// A publisher with no node: arcade settles, and a bare chain view answers
+// transactions, proofs and spends. It mints its trees, minting the next
+// ahead, and spends past the first into the second, as an application that
+// imports this package without a node does.
+func TestAPublisherNeedsNoNode(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	view := chainOnly{r.asset}
+	settler, arcade, err := publish.ParseSettler("arcade:"+r.asset.Base+"/arcade", publish.SettleOptions{Spends: view})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := bwallet.Open(r.dir, Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := LoadState(r.dir, w.Signer().IdentityHex())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := New(st, w.Signer(), w.Pool, Legs{Settler: settler, Arcade: arcade, Chain: view, Headers: r.headers,
+		Hosts: &unicast.Set{Hosts: []string{"http://host.invalid"}}},
+		Options{TreeCount: 4, TreeSats: limits.DefaultTreeSats, Ahead: 2, Fees: mint.NetworkFees,
+			Poll: 5 * time.Millisecond, Wait: 20 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Verbose = true
+	e.Note = func(format string, args ...any) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.notes = append(r.notes, fmt.Sprintf(format, args...))
+	}
+	if err := e.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v\n%s", err, r.said())
+	}
+	seen := map[string]bool{}
+	for i := 0; i < 6; i++ {
+		op := r.use(e)
+		if seen[op] {
+			t.Fatalf("funding output %s is spent twice\n%s", op, r.said())
+		}
+		seen[op] = true
+	}
+	if len(e.St.Trees) != 2 {
+		t.Fatalf("%d tree(s) adopted after six spends of four-output trees\n%s", len(e.St.Trees), r.said())
+	}
+	for _, tr := range e.St.Trees {
+		if r.chain.Tx(tr.Txid) == nil {
+			t.Fatalf("funding tree %s never reached the chain", tr.Txid)
+		}
+	}
+	if err := e.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

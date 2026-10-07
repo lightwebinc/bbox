@@ -100,6 +100,10 @@ published; a run that stops part way publishes the same bytes at the next
   pool);
 - takes the lock (`LockHome`) before it opens the wallet, and holds it
   while the engine runs: one process at a time per home;
+- needs no node: `Legs.Chain` is any `nodeapi.Chain` (bcommon's
+  `nodeapi.ParseChain("woc:main", ...)`, for one), `Legs.Settler` an
+  arcade (`publish.ParseSettler("arcade:main", ...)`) and `Legs.Headers`
+  any chain tracker; nothing asks for a node's asset API or RPC;
 - calls `Start` before the first object, and `Close` when done;
 - seals a payment in the same envelope it was built for: a `Pay` that is
   not sent is given back with `Pay.Abort`. A recipient takes a payment
