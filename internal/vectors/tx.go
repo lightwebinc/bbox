@@ -220,7 +220,7 @@ func (e *txEnv) build() error {
 	if !bytes.Equal(*sflock, boxrec.FundingScript(e.s.envelope)) {
 		return fmt.Errorf("bcommon's funding lock is not the funding script")
 	}
-	if e.tree, err = mint.FundingTree(sflock, 6, 1000, mint.Input{Tx: e.coin, Vout: 0, Unlocker: e.s.feeUnlocker()}, e.s.feeLock, mint.DefaultFees); err != nil {
+	if e.tree, err = mint.FundingTree(sflock, 6, 1000, mint.Input{Tx: e.coin, Vout: 0, Unlocker: e.s.feeUnlocker()}, e.s.feeLock, mint.LegacyFees); err != nil {
 		return err
 	}
 	e.c.mine(e.tree)
@@ -228,7 +228,7 @@ func (e *txEnv) build() error {
 	if err != nil {
 		return err
 	}
-	if e.rtree, err = mint.FundingTree(rflock, 3, 1000, mint.Input{Tx: e.coin, Vout: 4, Unlocker: e.r.feeUnlocker()}, e.r.feeLock, mint.DefaultFees); err != nil {
+	if e.rtree, err = mint.FundingTree(rflock, 3, 1000, mint.Input{Tx: e.coin, Vout: 4, Unlocker: e.r.feeUnlocker()}, e.r.feeLock, mint.LegacyFees); err != nil {
 		return err
 	}
 	e.c.mine(e.rtree)
