@@ -142,7 +142,7 @@ func (g *global) reader() (*reader.Client, error) {
 	}
 	rd := &reader.Client{Hosts: g.cfg.Hosts, Headers: hc, Timeout: g.cfg.Timeout, HTTP: httpClient}
 	if g.cfg.Asset != "" {
-		// A proof a host stored that a reorganisation left stale is
+		// A proof a host stored that a reorganization left stale is
 		// replaced by the node's current one (spec section 8.2).
 		rd.Source = &nodeapi.Asset{Base: g.cfg.Asset}
 	}
@@ -324,16 +324,18 @@ func cmdInit(_ context.Context, g *global, args []string) error {
 	return nil
 }
 
-const fundHelp = `usage: bbox fund [-blocks N] [-batch N] [-rescan]
-       bbox fund -txid TXID
+const fundHelp = `usage: bbox fund -txid TXID
+       bbox fund [-blocks N] [-batch N] [-rescan]   (coinbase: regtest only)
 
 With -txid, import a payment: read the mined transaction TXID with its
 proof from the node (asset), check the proof against the header source,
 and add every output it pays to the home's fund address to the pool. This
-is how a home on a real network is funded: send BSV to the fund address
-init printed, wait for one confirmation, and import it.
+is how a home on a real network (main or test) is funded: send BSV from
+your own wallet to the fund address init printed, wait for one
+confirmation, and import it.
 
-Without -txid, mine coinbase to the fund address through the node's
+Coinbase: only on a regtest chain you run (development and tests). Without
+-txid, mine coinbase to the fund address through the node's
 generatetoaddress, which only a chain you run answers. Coinbase can be
 spent 100 blocks after it is mined, so the first fund mines 101 or more.
 -rescan re-reads recent blocks for coinbase the pool lacks.
@@ -372,12 +374,14 @@ func checkFundAddress(addr, network string) error {
 	return nil
 }
 
+// cmdFund imports a payment (-txid), or mines or rescans coinbase.
+// Coinbase: only on a regtest chain you run (development and tests).
 func cmdFund(ctx context.Context, g *global, args []string) error {
 	fs := g.flagSet("fund", fundHelp)
-	blocks := fs.Int("blocks", 101, "blocks to mine to the fund address")
-	batch := fs.Int("batch", bwallet.DefaultFundBatch, "blocks per generatetoaddress call")
-	rescan := fs.Bool("rescan", false, "re-read the last -blocks blocks for coinbase the pool lacks instead of mining")
-	txid := fs.String("txid", "", "import this mined payment to the fund address instead of mining")
+	blocks := fs.Int("blocks", 101, "coinbase: only on a regtest chain you run (development and tests); blocks to mine to the fund address")
+	batch := fs.Int("batch", bwallet.DefaultFundBatch, "coinbase: only on a regtest chain you run (development and tests); blocks per generatetoaddress call")
+	rescan := fs.Bool("rescan", false, "coinbase: only on a regtest chain you run (development and tests); re-read the last -blocks blocks for coinbase the pool lacks instead of mining")
+	txid := fs.String("txid", "", "import this mined payment, sent from your own wallet to the fund address (main, test)")
 	if pos, err := parse(fs, args); err != nil {
 		return err
 	} else if len(pos) > 0 {
@@ -393,7 +397,7 @@ func cmdFund(ctx context.Context, g *global, args []string) error {
 		return usage("-blocks must be at least 1")
 	}
 	if g.cfg.Network == "main" {
-		return usage("fund without -txid mines coinbase, which only a chain you run does; on network main, import a payment with fund -txid")
+		return usage("fund without -txid mines coinbase (coinbase: only on a regtest chain you run, for development and tests); on network main, import a payment with fund -txid (one you sent from your own wallet to the fund address)")
 	}
 	e, unlock, err := g.lockedWallet()
 	if err != nil {

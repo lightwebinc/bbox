@@ -1,5 +1,6 @@
 // Package testchain is the local stand-ins this module's tests run against:
-// the shared chain, and this application's host.
+// the shared chain, and this application's host. Coinbase: only on a regtest
+// chain you run (development and tests).
 package testchain
 
 import (

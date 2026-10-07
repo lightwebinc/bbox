@@ -53,7 +53,7 @@ type Host struct {
 	Tamper func(beef []byte) []byte
 	// Stale answers every carrier under a proof of its funding tree that
 	// names another block than the one the chain mined it in: a host whose
-	// stored proofs a reorganisation left behind.
+	// stored proofs a reorganization left behind.
 	Stale bool
 	// HistoryPage, when set, is the most envelopes a history page holds
 	// here, in place of the class's 64.

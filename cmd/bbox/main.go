@@ -45,8 +45,10 @@ const usageText = `usage: bbox [global flags] <command> [flags] [arguments]
 
 identity (a home):
   init                         create the home: identity key and coin pool
-  fund -txid TXID              import a mined payment to the fund address
-  fund [-blocks N]             mine coinbase to the fund address (a chain you run)
+  fund -txid TXID              import a payment you sent from your own wallet
+                               to the fund address init printed (mainnet, testnet)
+  fund [-blocks N] [-rescan]   coinbase: only on a regtest chain you run
+                               (development and tests)
   office new <name>            create an office: <name>_<random suffix>, its topic,
                                and the BBOX_OFFICES line a host takes
   office list                  the offices this home created

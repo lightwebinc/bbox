@@ -126,7 +126,7 @@ func TestASweepIsKeptUnlessAnotherSpends(t *testing.T) {
 	}
 }
 
-// After a reorganisation a proof kept from before may name a block that is
+// After a reorganization a proof kept from before may name a block that is
 // no longer in the best chain. A reader handed such a proof by a host, and
 // a sender holding one in its home, each take the funding tree's current
 // proof from the node and verify that against their own headers.

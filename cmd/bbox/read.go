@@ -154,7 +154,7 @@ func (g *global) listing(ctx context.Context, rd *reader.Client, v view) (*reade
 	if len(refusals) > 0 && len(l.Items) == 0 {
 		// The hosts answered, and nothing they answered holds against this
 		// home's headers: as likely the header source as the hosts.
-		problem = incomplete("the hosts answered %d envelope(s) and none verifies against the header source %s: nothing is shown. A header source that does not answer fails every answer the same way (bbox doctor), and a proof a reorganisation displaced is replaced only from a node (config key asset)", len(refusals), g.cfg.HeaderURL)
+		problem = incomplete("the hosts answered %d envelope(s) and none verifies against the header source %s: nothing is shown. A header source that does not answer fails every answer the same way (bbox doctor), and a proof a reorganization displaced is replaced only from a node (config key asset)", len(refusals), g.cfg.HeaderURL)
 	}
 	for host, txids := range l.Missing() {
 		g.say("host %s: DISAGREES: it does not answer %d envelope(s) another host answered: %s", host, len(txids), strings.Join(txids, ", "))
@@ -923,7 +923,7 @@ func cmdHistory(ctx context.Context, g *global, args []string) error {
 	if err != nil {
 		return err
 	}
-	// A proof a host stored that a reorganisation left stale is replaced
+	// A proof a host stored that a reorganization left stale is replaced
 	// by the node's current one.
 	rd := &reader.Client{Headers: hc, Timeout: g.cfg.Timeout, HTTP: httpClient}
 	if g.cfg.Asset != "" {

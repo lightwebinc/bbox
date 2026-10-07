@@ -1,9 +1,10 @@
 // Command devchain is a local stand-in chain for trying bbox without a
-// node, a settlement service or any coin: it serves a node's JSON-RPC
-// (generatetoaddress, sendrawtransaction, getinfo) at /rpc, a node's asset
-// API under /api/v1/, and a header source (/v1/root/<height>, /v1/tip) that
-// the bbox command and the overlay hosts check proofs against. Every
-// transaction it accepts is mined at once, in a block of its own.
+// node, a settlement service or any coin. Coinbase: only on a regtest chain
+// you run (development and tests); it is never a network. It serves a
+// node's JSON-RPC (generatetoaddress, sendrawtransaction, getinfo) at /rpc,
+// a node's asset API under /api/v1/, and a header source (/v1/root/<height>,
+// /v1/tip) that the bbox command and the overlay hosts check proofs against.
+// Every transaction it accepts is mined at once, in a block of its own.
 //
 // It is package testchain served over HTTP. It checks what it is sent the
 // way a node would (inputs exist and are unspent, coinbase is mature,
@@ -47,7 +48,8 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(), `usage: devchain [-listen ADDR] [-height N] [-journal FILE]
 
-A local stand-in chain for trying bbox: a node's RPC at /rpc, its asset
+A local regtest stand-in chain for trying bbox (development and tests;
+coinbase from it is only on this chain): a node's RPC at /rpc, its asset
 API under /api/v1/, and a header source at /v1/root/<height> and /v1/tip.
 Every transaction is mined at once. No proof of work, no peers: for a
 laptop, never for a network.
