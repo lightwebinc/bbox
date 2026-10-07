@@ -17,7 +17,7 @@ func TestPayWords(t *testing.T) {
 		want string
 	}{
 		{purse.ErrOverMaxPay, "more than the 6 this command may pay (-max-sats)"},
-		{purse.ErrNoNode, "(config key asset)"},
+		{purse.ErrNoNode, "(config key chain)"},
 		{purse.ErrNoSettler, "(config key settle)"},
 		{purse.ErrNotMined, "run the command again to take it into the pool once it is"},
 	} {

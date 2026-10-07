@@ -136,14 +136,14 @@ func (e *Engine) Retract(ctx context.Context, txid string, vouts []uint32, offic
 // the next run. A node that cannot answer leaves the output in: the sweep
 // is then what finds out.
 func (e *Engine) adoptSpends(ctx context.Context, txid string, vouts []uint32, offices []string) ([]uint32, error) {
-	if e.Legs.Asset == nil {
+	if e.Legs.Chain == nil {
 		return vouts, nil
 	}
 	var left []uint32
 	spenders := map[string]bool{}
 	var order []string
 	for _, v := range vouts {
-		by, err := e.Legs.Asset.Spender(ctx, txid, v)
+		by, err := e.Legs.Chain.Spender(ctx, txid, v)
 		if err != nil || by == "" {
 			left = append(left, v)
 			continue
@@ -158,7 +158,7 @@ func (e *Engine) adoptSpends(ctx context.Context, txid string, vouts []uint32, o
 			e.note("funding tree %s: the node names a spender that is not a transaction id; its outputs are left for the next run", short(txid))
 			continue
 		}
-		raw, err := e.Legs.Asset.TxRaw(ctx, by)
+		raw, err := e.Legs.Chain.TxRaw(ctx, by)
 		if err != nil {
 			e.note("funding tree %s: an output is spent by %s, which the node could not show (%v); it is left for the next run", short(txid), short(by), err)
 			continue
@@ -168,7 +168,7 @@ func (e *Engine) adoptSpends(ctx context.Context, txid string, vouts []uint32, o
 			e.note("funding tree %s: an output is spent by %s, and the node answered other bytes for it; it is left for the next run", short(txid), short(by))
 			continue
 		}
-		mp, height, err := e.Legs.Asset.Proof(ctx, by)
+		mp, height, err := e.Legs.Chain.Proof(ctx, by)
 		if err != nil {
 			e.note("funding tree %s: an output is spent by %s, which has not mined yet; it is left for the next run", short(txid), short(by))
 			continue
@@ -229,7 +229,7 @@ func (e *Engine) sweepFee(ctx context.Context, payer *producer.Payer) (mint.Inpu
 				return mint.Input{}, nil, ctx.Err()
 			case <-time.After(poll):
 			}
-			CollectChange(ctx, e.Pool, e.Legs.Asset)
+			CollectChange(ctx, e.Pool, e.Legs.Chain)
 			continue
 		}
 		if err != nil {
@@ -371,10 +371,10 @@ func (e *Engine) sources(ctx context.Context, tx *transaction.Transaction) error
 		id := in.SourceTXID.String()
 		src, err := e.kept.Tx(id)
 		if err != nil {
-			if e.Legs.Asset == nil {
+			if e.Legs.Chain == nil {
 				return fmt.Errorf("input %d: %s is not kept and no node is configured to read it from", i, id)
 			}
-			raw, ferr := e.Legs.Asset.TxRaw(ctx, id)
+			raw, ferr := e.Legs.Chain.TxRaw(ctx, id)
 			if ferr != nil {
 				return fmt.Errorf("input %d: reading %s from the node: %w", i, id, ferr)
 			}

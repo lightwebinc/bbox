@@ -293,7 +293,7 @@ func TestLimitsAndUsage(t *testing.T) {
 	h.want(h.run("bob", "", "ack", strings.Repeat("ab", 32)), exitUsage, "read it first")
 	h.want(h.run("alice", "", "office", "new", "Bad"), exitUsage, "office name")
 	h.env["BBOX_NETWORK"] = "main"
-	h.want(h.run("alice", "", "fund", "-blocks", "1"), exitUsage, "on network main, import a payment with fund -txid")
+	h.want(h.run("alice", "", "fund", "-blocks", "1"), exitUsage, "on network main, import a payment you sent from your own wallet to the fund address with fund -txid or fund -beef")
 }
 
 // A host that edits an envelope it serves is named, and what it answered

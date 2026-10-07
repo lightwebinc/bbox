@@ -47,6 +47,8 @@ identity (a home):
   init                         create the home: identity key and coin pool
   fund -txid TXID              import a payment you sent from your own wallet
                                to the fund address init printed (mainnet, testnet)
+  fund -beef FILE|-            import that payment as the BEEF your wallet
+                               hands over, with no lookup
   fund [-blocks N] [-rescan]   coinbase: only on a regtest chain you run
                                (development and tests)
   office new <name>            create an office: <name>_<random suffix>, its topic,
@@ -82,8 +84,17 @@ global flags:
   -home DIR           the identity's home (default ~/.bbox)
   -hosts URLS         overlay hosts, comma separated: every host a reader asks,
                       and in mode unicast every host a publisher submits to
-  -header-url SOURCE  header source: a bridge URL, woc:main, woc:test or
-                      chaintracks:URL; required to verify, no default
+  -chain SPEC         chain view: woc:main, woc:test or asset:<node URL>
+                      (default woc:<network>; no node needed)
+  -fee-floor SATS     least fee a transaction pays (default 250)
+  -fee-max-rate RATE  most a fee rate may be, SATS/BYTES (with -fee-source
+                      arc, default 1/1)
+  -fee-rate RATE      miner fee rate, SATS/BYTES (default 100/1000)
+  -fee-source SRC     static (default) or arc: the broadcaster's published
+                      policy, held to -fee-max-rate
+  -header-url SOURCE  header source: woc:main, woc:test, bhs:URL,
+                      arcade:URL, chaintracks:URL or a bridge URL
+                      (default woc:<network>)
   -mode MODE          plane (submit once to the facade; the default) or
                       unicast (submit to each of hosts)
   -network NET        main, test or regtest (default main)
@@ -91,6 +102,9 @@ global flags:
   -quorum Q           hosts that must hold an envelope or a receipt for it
                       to count as published: all (default), majority, one
                       or N; a sweep always needs every host
+  -settle SPEC        settlement leg: arcade:main, arcade:test, arcade:URL,
+                      arc:URL, rpc:URL or tcp:HOST:PORT
+                      (default arcade:<network>)
   -timeout DUR        per request (default 15s)
   -v                  verbose
   -version            print the version and exit
@@ -185,17 +199,23 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprint(stderr, usageText) }
 	var (
-		cfgPath   = fs.String("config", "", "")
-		home      = fs.String("home", "", "")
-		hosts     = fs.String("hosts", "", "")
-		headerURL = fs.String("header-url", "", "")
-		mode      = fs.String("mode", "", "")
-		network   = fs.String("network", "", "")
-		office    = fs.String("office", "", "")
-		quorum    = fs.String("quorum", "", "")
-		timeout   = fs.String("timeout", "", "")
-		verbose   = fs.Bool("v", false, "")
-		showVer   = fs.Bool("version", false, "")
+		cfgPath    = fs.String("config", "", "")
+		chain      = fs.String("chain", "", "")
+		feeFloor   = fs.String("fee-floor", "", "")
+		feeMaxRate = fs.String("fee-max-rate", "", "")
+		feeRate    = fs.String("fee-rate", "", "")
+		feeSource  = fs.String("fee-source", "", "")
+		settle     = fs.String("settle", "", "")
+		home       = fs.String("home", "", "")
+		hosts      = fs.String("hosts", "", "")
+		headerURL  = fs.String("header-url", "", "")
+		mode       = fs.String("mode", "", "")
+		network    = fs.String("network", "", "")
+		office     = fs.String("office", "", "")
+		quorum     = fs.String("quorum", "", "")
+		timeout    = fs.String("timeout", "", "")
+		verbose    = fs.Bool("v", false, "")
+		showVer    = fs.Bool("version", false, "")
 	)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -232,7 +252,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return exitUsage
 	}
 	over := map[string]string{}
-	for k, v := range map[string]string{"home": *home, "hosts": *hosts, "header_url": *headerURL, "mode": *mode, "network": *network, "office": *office, "quorum": *quorum, "timeout": *timeout} {
+	for k, v := range map[string]string{"chain": *chain, "fee_floor": *feeFloor, "fee_max_rate": *feeMaxRate,
+		"fee_rate": *feeRate, "fee_source": *feeSource, "settle": *settle, "home": *home, "hosts": *hosts, "header_url": *headerURL, "mode": *mode, "network": *network, "office": *office, "quorum": *quorum, "timeout": *timeout} {
 		if v != "" {
 			over[k] = v
 		}
@@ -241,7 +262,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintln(stderr, "bbox:", err)
 		return exitUsage
 	}
-	if err := checkHeaderSource(cfg.HeaderURL, cfg.Network); err != nil {
+	if err := checkNetwork(cfg); err != nil {
 		fmt.Fprintln(stderr, "bbox:", err)
 		return exitUsage
 	}
@@ -262,18 +283,27 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
-// checkHeaderSource refuses a header source that does not parse, or a
-// WhatsOnChain source for another network than the configured one.
-func checkHeaderSource(spec, network string) error {
-	if spec == "" {
-		return nil
+// checkNetwork refuses a header source that does not parse, and a public
+// service named for another network than the configured one: WhatsOnChain
+// headers or chain view, or GorillaPool's arcade.
+func checkNetwork(cfg config.Config) error {
+	network := cfg.Network
+	if spec := cfg.Headers(); spec != "" {
+		kind, _, implied, err := headers.Parse(spec)
+		if err != nil {
+			return err
+		}
+		if kind == headers.WhatsOnChain && implied != network {
+			return fmt.Errorf("header source %s is the %s network but network is %s", spec, implied, network)
+		}
 	}
-	kind, _, implied, err := headers.Parse(spec)
-	if err != nil {
-		return err
+	for _, b := range config.Backends(cfg.ChainSpec()) {
+		if n, ok := strings.CutPrefix(b, "woc:"); ok && n != network {
+			return fmt.Errorf("chain %s is the %s network but network is %s", cfg.ChainSpec(), n, network)
+		}
 	}
-	if kind == headers.WhatsOnChain && implied != network {
-		return fmt.Errorf("header source %s is the %s network but network is %s", spec, implied, network)
+	if n, ok := strings.CutPrefix(cfg.SettleSpec(), "arcade:"); ok && (n == "main" || n == "test") && n != network {
+		return fmt.Errorf("settle %s is the %s network but network is %s", cfg.SettleSpec(), n, network)
 	}
 	return nil
 }
@@ -281,14 +311,15 @@ func checkHeaderSource(spec, network string) error {
 // headerClient is the configured header source, held to the network's
 // proof-of-work floor when it serves header fields.
 func (g *global) headerClient() (*headers.Client, error) {
-	if g.cfg.HeaderURL == "" {
-		return nil, usage("no header source: set header_url (or -header-url); an envelope is only as good as the headers it is checked against")
+	spec := g.cfg.Headers()
+	if spec == "" {
+		return nil, usage("no header source: set header_url (or -header-url); a regtest chain has no public one, and an envelope is only as good as the headers it is checked against")
 	}
-	c := headers.New(g.cfg.HeaderURL)
+	c := headers.New(spec)
 	if c.Kind != headers.Native {
 		c.Network = g.cfg.Network
 	}
-	c.Timeout = g.cfg.Timeout
+	c.Timeout, c.Token = g.cfg.Timeout, g.cfg.HeaderToken
 	return c, nil
 }
 

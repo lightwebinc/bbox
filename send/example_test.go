@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lightwebinc/bcommon/bwallet"
+	"github.com/lightwebinc/bcommon/headers"
 	"github.com/lightwebinc/bcommon/mint"
 	"github.com/lightwebinc/bcommon/nodeapi"
 	"github.com/lightwebinc/bcommon/publish"
@@ -65,9 +66,21 @@ func ExampleEngine_Envelope() {
 	if err != nil {
 		return
 	}
+	// No node: WhatsOnChain headers and chain view, GorillaPool's arcade.
+	hc := headers.New("woc:main")
+	chain, err := nodeapi.ParseChain("woc:main", nodeapi.ChainOptions{Headers: hc})
+	if err != nil {
+		return
+	}
+	settler, arcade, err := publish.ParseSettler("arcade:main", publish.SettleOptions{Spends: chain})
+	if err != nil {
+		return
+	}
 	legs := send.Legs{
-		Settler: &publish.Arcade{Base: "https://arcade.example"},
-		Asset:   &nodeapi.Asset{Base: "https://node.example"},
+		Settler: settler,
+		Arcade:  arcade,
+		Chain:   chain,
+		Headers: hc,
 		Facade:  &publish.Facade{Base: "https://host.example"},
 	}
 	eng, err := send.New(st, w.Signer(), w.Pool, legs, send.Options{TreeCount: 32, TreeSats: 1, Ahead: 4,

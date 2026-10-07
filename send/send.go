@@ -92,12 +92,13 @@ type Options struct {
 // mode plane, Direct are the other hosts a sweep is also submitted to, since
 // a host off the plane learns of a sweep only by receiving it. Reader
 // confirms, by lookup, a host that admitted nothing, and on the plane that
-// the hosts named hold what the facade took. Headers, when set, are the
-// publisher's own block headers: a kept proof a reorganization left stale
-// is replaced by the node's current one before it is used.
+// the hosts named hold what the facade took. Headers are the publisher's
+// own block headers: the chain tip, and a kept proof a reorganization left
+// stale is replaced by the chain's current one before it is used. Chain is
+// the chain view (a node, or WhatsOnChain): transactions, proofs and spends.
 type Legs struct {
 	Settler publish.Settler
-	Asset   *nodeapi.Asset
+	Chain   nodeapi.Chain
 	Arcade  *publish.Arcade
 	Facade  *publish.Facade
 	Hosts   *unicast.Set
@@ -133,8 +134,8 @@ func New(st *state.State, signer *bwallet.Signer, pool *bwallet.Pool, legs Legs,
 	if st.Identity != signer.IdentityHex() {
 		return nil, fmt.Errorf("the state belongs to identity %s, not this home's %s", st.Identity, signer.IdentityHex())
 	}
-	if legs.Settler == nil || legs.Asset == nil {
-		return nil, errors.New("a publisher needs a settlement leg and a node (config keys settle and asset)")
+	if legs.Settler == nil || legs.Chain == nil || legs.Headers == nil {
+		return nil, errors.New("a publisher needs a settlement leg, a chain view and a header source (config keys settle, chain and header_url)")
 	}
 	if (legs.Facade == nil) == (legs.Hosts == nil) {
 		return nil, errors.New("a publisher needs either a facade (mode plane) or hosts (mode unicast)")
@@ -160,7 +161,7 @@ func New(st *state.State, signer *bwallet.Signer, pool *bwallet.Pool, legs Legs,
 func (e *Engine) NewPayer() *producer.Payer {
 	p := &producer.Payer{
 		Pool: e.Pool, Keys: map[string]*bwallet.Signer{e.Signer.IdentityHex(): e.Signer},
-		Kept: e.kept, Settler: e.Legs.Settler, Asset: e.Legs.Asset, Fees: e.Opts.Fees,
+		Kept: e.kept, Settler: e.Legs.Settler, Chain: e.Legs.Chain, Fees: e.Opts.Fees,
 		Timeout: e.Opts.Wait, Poll: e.Opts.Poll, Note: e.libraryNote,
 	}
 	if e.payer != nil {
@@ -243,15 +244,15 @@ func FeeError(err error) error {
 // a sweep that cannot finish does not keep an envelope from the hosts. The
 // first failure is returned; the others are noted.
 func (e *Engine) Start(ctx context.Context) error {
-	h, err := e.Legs.Asset.BestHeader(ctx)
+	h, err := e.Legs.Headers.CurrentHeight(ctx)
 	if err != nil {
-		return fmt.Errorf("node tip: %w", err)
+		return fmt.Errorf("chain tip: %w", err)
 	}
-	e.payer.Tip = h.Height
-	CollectChange(ctx, e.Pool, e.Legs.Asset)
+	e.payer.Tip = h
+	CollectChange(ctx, e.Pool, e.Legs.Chain)
 	// What a run that stopped took from the pool and never recorded goes
 	// back; from here every save records the pool before a coin is taken.
-	Journal(e.St, e.Pool, Reconcile(ctx, e.St, e.Pool, e.Legs.Asset, e.note))
+	Journal(e.St, e.Pool, Reconcile(ctx, e.St, e.Pool, e.Legs.Chain, e.note))
 	if err := e.St.Save(); err != nil {
 		return err
 	}
@@ -283,10 +284,10 @@ func (e *Engine) Start(ctx context.Context) error {
 // CollectChange gives every unproven coin in the pool its proof, once its
 // transaction has mined: change from a payment the payee broadcast, or
 // from anything else published before it mined.
-func CollectChange(ctx context.Context, pool *bwallet.Pool, asset *nodeapi.Asset) int {
+func CollectChange(ctx context.Context, pool *bwallet.Pool, proofs nodeapi.ProofSource) int {
 	n := 0
 	for _, id := range pool.UnprovenTxids() {
-		mp, h, err := asset.Proof(ctx, id)
+		mp, h, err := proofs.Proof(ctx, id)
 		if err != nil {
 			continue
 		}
@@ -458,7 +459,7 @@ func (e *Engine) reproveTree(ctx context.Context, tree *transaction.Transaction)
 // first tree, and one needed before its block, is waited for here.
 func (e *Engine) prove(ctx context.Context, tree *transaction.Transaction) error {
 	id := tree.TxID().String()
-	mp, height, err := producer.Proofs{Arcade: e.Legs.Arcade, Asset: e.Legs.Asset}.Of(ctx, id)
+	mp, height, err := producer.Proofs{Arcade: e.Legs.Arcade, Source: e.Legs.Chain, Spends: e.Legs.Chain}.Of(ctx, id)
 	if err != nil {
 		e.note("funding tree %s: waiting for it to mine", id)
 		if mp, height, err = e.NewPayer().Await(ctx, "funding tree", tree); err != nil {
@@ -467,7 +468,7 @@ func (e *Engine) prove(ctx context.Context, tree *transaction.Transaction) error
 	}
 	tree.MerklePath = mp
 	e.kept.Prove(id, mp)
-	CollectChange(ctx, e.Pool, e.Legs.Asset)
+	CollectChange(ctx, e.Pool, e.Legs.Chain)
 	for _, t := range append([]*funding.Tree{e.St.Tree}, ptrs(e.St.Trees)...) {
 		if t != nil && t.Txid == id {
 			t.BumpHex, t.Height, t.BeefHex = mp.Hex(), height, ""

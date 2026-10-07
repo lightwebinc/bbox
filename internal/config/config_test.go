@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lightwebinc/bcommon/mint"
 )
 
 func TestFileEnvironmentAndFlagsLayer(t *testing.T) {
@@ -96,5 +98,63 @@ func TestModeAndQuorum(t *testing.T) {
 	}
 	if _, err := Need("all", 0); err == nil {
 		t.Error("no hosts")
+	}
+}
+
+// TestNoNodeDefaults: on main and test the chain services default to the
+// public ones, so that no node is needed; a regtest chain names its own.
+// The older asset key maps to chain = asset:URL and may not sit beside it.
+func TestNoNodeDefaults(t *testing.T) {
+	for _, n := range []string{"main", "test"} {
+		c, err := Defaults().Apply(map[string]string{"network": n})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Headers() != "woc:"+n || c.ChainSpec() != "woc:"+n || c.SettleSpec() != "arcade:"+n || c.AssetURL() != "" {
+			t.Errorf("%s: headers %q chain %q settle %q asset %q", n, c.Headers(), c.ChainSpec(), c.SettleSpec(), c.AssetURL())
+		}
+	}
+	c, err := Defaults().Apply(map[string]string{"network": "regtest"})
+	if err != nil || c.Headers() != "" || c.ChainSpec() != "" || c.SettleSpec() != "" {
+		t.Errorf("regtest has defaults: %v %q %q %q", err, c.Headers(), c.ChainSpec(), c.SettleSpec())
+	}
+	c, err = Defaults().Apply(map[string]string{"asset": "http://192.0.2.1:8090"})
+	if err != nil || c.ChainSpec() != "asset:http://192.0.2.1:8090" || c.AssetURL() != "http://192.0.2.1:8090" {
+		t.Errorf("asset: %v %q %q", err, c.ChainSpec(), c.AssetURL())
+	}
+	c, err = Defaults().Apply(map[string]string{"chain": "woc:test,spend=asset:http://192.0.2.1:8090"})
+	if err != nil || c.AssetURL() != "http://192.0.2.1:8090" {
+		t.Errorf("chain with a node's spend view: %v %q", err, c.AssetURL())
+	}
+	if _, err := Defaults().Apply(map[string]string{"chain": "woc:main", "asset": "http://192.0.2.1:8090"}); err == nil {
+		t.Error("chain and asset together applied")
+	}
+	if _, err := Defaults().Apply(map[string]string{"chain": "node:x"}); err == nil {
+		t.Error("a chain that does not parse applied")
+	}
+}
+
+// TestFeeKeys: the fee_* keys make bcommon's fee block; unset, the
+// network's rate.
+func TestFeeKeys(t *testing.T) {
+	c, err := Defaults().Apply(map[string]string{"fee_rate": "50/1000", "fee_floor": "1", "fee_dust": "1",
+		"fee_max_rate": "1/1", "fee_max_tx": "100000", "fee_source": "arc", "fee_policy_urls": "https://arc.example, https://arc2.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := c.Fee.Fees(mint.DefaultFees)
+	if err != nil || f.Rate != (mint.Rate{Sats: 50, Bytes: 1000}) || f.Floor != 1 || f.Dust != 1 || f.Max != 100000 ||
+		c.Fee.Source != "arc" || len(c.Fee.PolicyURLs) != 2 {
+		t.Fatalf("%v %+v %+v", err, f, c.Fee)
+	}
+	d := Defaults()
+	f, err = d.Fee.Fees(mint.DefaultFees)
+	if err != nil || f.Rate != mint.DefaultFees.Rate || f.Floor != mint.DefaultFees.Floor {
+		t.Fatalf("default fees: %v %+v", err, f)
+	}
+	for k, v := range map[string]string{"fee_rate": "1/0", "fee_source": "live", "fee_floor": "-1", "fund_mined_only": "maybe", "woc_rate": "0"} {
+		if _, err := Defaults().Apply(map[string]string{k: v}); err == nil {
+			t.Errorf("%s = %s applied", k, v)
+		}
 	}
 }

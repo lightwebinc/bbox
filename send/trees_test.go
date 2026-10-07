@@ -14,6 +14,7 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
 	"github.com/lightwebinc/bcommon/bwallet"
+	"github.com/lightwebinc/bcommon/headers"
 	"github.com/lightwebinc/bcommon/mint"
 	"github.com/lightwebinc/bcommon/nodeapi"
 	"github.com/lightwebinc/bcommon/publish"
@@ -33,6 +34,8 @@ type rig struct {
 	chain *testchain.Chain
 	rpc   *nodeapi.RPC
 	asset *nodeapi.Asset
+	// headers is the chain's own header source (a bridge's /v1).
+	headers *headers.Client
 
 	mu    sync.Mutex
 	notes []string
@@ -44,7 +47,7 @@ func newRig(t *testing.T) *rig {
 	srv := httptest.NewServer(chain)
 	t.Cleanup(srv.Close)
 	r := &rig{t: t, dir: t.TempDir(), chain: chain,
-		rpc: &nodeapi.RPC{URL: srv.URL + "/rpc", ID: "bbox"}, asset: &nodeapi.Asset{Base: srv.URL}}
+		rpc: &nodeapi.RPC{URL: srv.URL + "/rpc", ID: "bbox"}, asset: &nodeapi.Asset{Base: srv.URL}, headers: headers.New(srv.URL)}
 	w, err := bwallet.Create(r.dir, Profile)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +74,7 @@ func (r *rig) build(ahead uint32, edit func(*state.State)) *Engine {
 	if edit != nil {
 		edit(st)
 	}
-	e, err := New(st, w.Signer(), w.Pool, Legs{Settler: &publish.RPCSettler{RPC: r.rpc}, Asset: r.asset,
+	e, err := New(st, w.Signer(), w.Pool, Legs{Settler: &publish.RPCSettler{RPC: r.rpc}, Chain: r.asset, Headers: r.headers,
 		Hosts: &unicast.Set{Hosts: []string{"http://host.invalid"}}},
 		Options{TreeCount: 4, TreeSats: limits.DefaultTreeSats, Ahead: ahead, Fees: mint.DefaultFees,
 			Poll: 5 * time.Millisecond, Wait: 20 * time.Second})

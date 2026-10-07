@@ -120,7 +120,7 @@ func payWords(err error, maxSats uint64) error {
 	case errors.Is(err, purse.ErrOverMaxPay):
 		return fmt.Errorf("%w: more than the %d this command may pay (-max-sats)", err, maxSats)
 	case errors.Is(err, purse.ErrNoNode):
-		return fmt.Errorf("%w (config key asset)", err)
+		return fmt.Errorf("%w (config key chain)", err)
 	case errors.Is(err, purse.ErrNoSettler):
 		return fmt.Errorf("%w (config key settle)", err)
 	case errors.Is(err, purse.ErrNotMined):

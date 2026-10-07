@@ -26,8 +26,6 @@ import (
 	"github.com/lightwebinc/bcommon/funding"
 	"github.com/lightwebinc/bcommon/guard"
 	"github.com/lightwebinc/bcommon/lookup"
-	"github.com/lightwebinc/bcommon/mint"
-	"github.com/lightwebinc/bcommon/nodeapi"
 	"github.com/lightwebinc/bcommon/producer"
 	"github.com/lightwebinc/bcommon/purse"
 	"github.com/lightwebinc/bcommon/termsafe"
@@ -154,7 +152,7 @@ func (g *global) listing(ctx context.Context, rd *reader.Client, v view) (*reade
 	if len(refusals) > 0 && len(l.Items) == 0 {
 		// The hosts answered, and nothing they answered holds against this
 		// home's headers: as likely the header source as the hosts.
-		problem = incomplete("the hosts answered %d envelope(s) and none verifies against the header source %s: nothing is shown. A header source that does not answer fails every answer the same way (bbox doctor), and a proof a reorganization displaced is replaced only from a node (config key asset)", len(refusals), g.cfg.HeaderURL)
+		problem = incomplete("the hosts answered %d envelope(s) and none verifies against the header source %s: nothing is shown. A header source that does not answer fails every answer the same way (bbox doctor), and a proof a reorganization displaced is replaced only from a chain view (config key chain)", len(refusals), g.cfg.Headers())
 	}
 	for host, txids := range l.Missing() {
 		g.say("host %s: DISAGREES: it does not answer %d envelope(s) another host answered: %s", host, len(txids), strings.Join(txids, ", "))
@@ -323,7 +321,7 @@ func cmdRead(ctx context.Context, g *global, args []string) error {
 		for _, id := range pos {
 			it := l.Find(id)
 			if it == nil && l.Refused(id) {
-				return incomplete("%s: the hosts answered it, each answer named above, and none verifies against the header source %s: nothing is shown, and it is not absent. Ask other hosts, or check the header source (bbox doctor)", id, g.cfg.HeaderURL)
+				return incomplete("%s: the hosts answered it, each answer named above, and none verifies against the header source %s: nothing is shown, and it is not absent. Ask other hosts, or check the header source (bbox doctor)", id, g.cfg.Headers())
 			}
 			if it == nil {
 				return incomplete("no host answers %s in the %s: an envelope that is acknowledged, expired, retracted or never sent is not answered by a free question (bbox history asks for what a host keeps)", id, v)
@@ -408,19 +406,23 @@ func (g *global) printMessage(m *reader.Message, hosts string) {
 // the header source: what internalize, history and payee settle pay and
 // take through.
 func (g *global) purse(ctx context.Context, h *home, hc chaintracker.ChainTracker, maxPay uint64) (*purse.Purse, error) {
-	_, asset, err := g.node(false)
+	chain, err := g.chain(hc)
 	if err != nil {
 		return nil, err
 	}
-	settler, _, err := g.settler()
+	settler, _, err := g.settler(chain)
 	if err != nil {
 		return nil, err
 	}
-	tip, err := asset.BestHeader(ctx)
+	fees, err := g.fees(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("node tip: %w", err)
+		return nil, err
 	}
-	send.CollectChange(ctx, h.e.Pool, asset)
+	tip, err := hc.CurrentHeight(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("chain tip: %w", err)
+	}
+	send.CollectChange(ctx, h.e.Pool, chain)
 	if h.st.KeepPayments(h.e.Pool.UnprovenTxids()) {
 		if err := h.st.Save(); err != nil {
 			return nil, err
@@ -428,11 +430,11 @@ func (g *global) purse(ctx context.Context, h *home, hc chaintracker.ChainTracke
 	}
 	s := h.e.Signer()
 	newPayer := func() *producer.Payer {
-		return &producer.Payer{Pool: h.e.Pool, Tip: tip.Height, Keys: map[string]*bwallet.Signer{s.IdentityHex(): s},
-			Settler: settler, Asset: asset, Fees: mint.DefaultFees, Poll: poll, Note: g.say}
+		return &producer.Payer{Pool: h.e.Pool, Tip: tip, Keys: map[string]*bwallet.Signer{s.IdentityHex(): s},
+			Settler: settler, Chain: chain, Fees: fees, Poll: poll, Note: g.say}
 	}
-	return &purse.Purse{Embedded: h.e, NewPayer: newPayer, Fees: mint.DefaultFees, MaxPay: maxPay,
-		Settler: settler, Asset: asset, Headers: hc, Wait: 10 * time.Minute, Poll: poll}, nil
+	return &purse.Purse{Embedded: h.e, NewPayer: newPayer, Fees: fees, MaxPay: maxPay,
+		Settler: settler, Chain: chain, Headers: hc, Wait: 10 * time.Minute, Poll: poll}, nil
 }
 
 const internalizeHelp = `usage: bbox internalize <txid> [-no-ack] [-office OFFICE]
@@ -488,7 +490,7 @@ func cmdInternalize(ctx context.Context, g *global, args []string) error {
 	}
 	it := l.Find(pos[0])
 	if it == nil && l.Refused(pos[0]) {
-		return incomplete("%s: the hosts answered it, each answer named above, and none verifies against the header source %s: nothing is taken, and it is not absent. Ask other hosts, or check the header source (bbox doctor)", pos[0], g.cfg.HeaderURL)
+		return incomplete("%s: the hosts answered it, each answer named above, and none verifies against the header source %s: nothing is taken, and it is not absent. Ask other hosts, or check the header source (bbox doctor)", pos[0], g.cfg.Headers())
 	}
 	if it == nil {
 		// Acknowledged, or no longer answered: the carrier read kept is
@@ -577,8 +579,8 @@ func (g *global) acceptPayment(ctx context.Context, p *purse.Purse, hc chaintrac
 		pays = append(pays, acceptance.Output{Vout: o.OutputIndex, Script: *out.LockingScript, Sats: out.Satoshis})
 	}
 	v := &acceptance.Verifier{Policy: g.cfg.AcceptPolicy(), Exposure: acceptance.NewExposure(), Headers: hc}
-	if _, arc, err := g.settler(); err == nil && arc != nil && p.Asset != nil {
-		v.Settler, v.Status, v.Spends, v.Proofs = arc, []acceptance.StatusSource{arc}, p.Asset, p.Asset
+	if _, arc, err := g.settler(p.Chain); err == nil && arc != nil && p.Chain != nil {
+		v.Settler, v.Status, v.Spends, v.Proofs = arc, []acceptance.StatusSource{arc}, p.Chain, p.Chain
 	}
 	return v.Accept(ctx, acceptance.Payment{Tx: tx, Payer: from, Pays: pays})
 }
@@ -797,7 +799,7 @@ func (g *global) ask(ctx context.Context, h *home, hc chaintracker.ChainTracker,
 	}
 	// The pool is recorded before a coin is taken from it, and a coin a
 	// run that stopped took and never recorded goes back (send.Journal).
-	send.Journal(h.st, h.e.Pool, send.Reconcile(ctx, h.st, h.e.Pool, p.Asset, g.say))
+	send.Journal(h.st, h.e.Pool, send.Reconcile(ctx, h.st, h.e.Pool, p.Chain, g.say))
 	if err := h.st.Save(); err != nil {
 		return nil, 0, err
 	}
@@ -926,9 +928,7 @@ func cmdHistory(ctx context.Context, g *global, args []string) error {
 	// A proof a host stored that a reorganization left stale is replaced
 	// by the node's current one.
 	rd := &reader.Client{Headers: hc, Timeout: g.cfg.Timeout, HTTP: httpClient}
-	if g.cfg.Asset != "" {
-		rd.Source = &nodeapi.Asset{Base: g.cfg.Asset}
-	}
+	g.currentProofs(rd)
 	me := h.e.Signer().Identity.Compressed()
 	q := map[string]string{"office": off, "history": hex.EncodeToString(me)}
 	if *after != "" {

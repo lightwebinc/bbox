@@ -43,7 +43,7 @@ func Unjournal(st *state.State) {
 // node is asked: a coin it shows unspent goes back in the pool; one it
 // shows spent is spent by a transaction this home did not record, and is
 // reported; one it cannot answer for is carried over to the next command.
-func Reconcile(ctx context.Context, st *state.State, pool *bwallet.Pool, asset *nodeapi.Asset, note func(string, ...any)) []bwallet.Output {
+func Reconcile(ctx context.Context, st *state.State, pool *bwallet.Pool, spends nodeapi.SpendSource, note func(string, ...any)) []bwallet.Output {
 	if len(st.Taking) == 0 {
 		return nil
 	}
@@ -59,11 +59,11 @@ func Reconcile(ctx context.Context, st *state.State, pool *bwallet.Pool, asset *
 			continue
 		}
 		held[op] = true
-		if asset == nil {
+		if spends == nil {
 			carried = append(carried, o)
 			continue
 		}
-		by, err := asset.Spender(ctx, o.TxID, o.Vout)
+		by, err := spends.Spender(ctx, o.TxID, o.Vout)
 		switch {
 		case err != nil:
 			note("coin %s was taken from the pool by a run that stopped before it recorded what spent it, and the node could not say whether it is spent (%v): it is looked at again by the next command", op, err)
