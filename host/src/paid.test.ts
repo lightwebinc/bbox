@@ -27,11 +27,33 @@ import {
   type PeerSession,
   type WalletInterface,
 } from '@bsv/sdk'
-import { DefaultBudget, DefaultResponseBudget, type BudgetConfig, type ResponseBudgetConfig } from './budget.js'
 import { MemoryJournal } from './journal.js'
 import { bboxModule } from './module.js'
-import { BoundedSessions, LedgerReceiver, LookupFront, MemoryReceiver, parsePrices, spentOutpoints, termsDocument, type ReceivedPayment } from './paid.js'
-import { ArcadeHttp, BroadcastRefused, PaymentGate, isFinal, overspends } from './accept.js'
+import {
+  ArcadeHttp,
+  BoundedSessions,
+  BroadcastRefused,
+  DefaultBudget,
+  DefaultResponseBudget,
+  LedgerReceiver as SharedLedger,
+  LookupFront,
+  MemoryReceiver,
+  PaymentGate,
+  isFinal,
+  overspends,
+  spentOutpoints,
+  type BudgetConfig,
+  type ReceivedPayment,
+  type ResponseBudgetConfig,
+} from '@lightwebinc/bcommon/host'
+import { Ledger, bboxRoute, parsePrices, termsDocument } from './paid.js'
+
+/** bbox's ledger: the shared receiver in the layout bbox writes. */
+class LedgerReceiver extends SharedLedger {
+  constructor(dir: string) {
+    super(dir, Ledger)
+  }
+}
 import { PaymentProtocol } from './payment.js'
 import { TestNetwork } from './testnetwork.js'
 import { Chain, Party, PayingWallet, carrier, commitment, envelopeRecord, fromNowhere, fundingTree, receiptRecord } from './testmint.js'
@@ -91,7 +113,7 @@ async function rig(prices: string, sessions?: { max: number; ttlSeconds: number 
   }
   const net = new TestNetwork(chain)
   const gate = new PaymentGate({ app: 'bbox', host, headers: chain.tracker, policy: { ...defaultAcceptancePolicy(), ...policy }, arcade: networked ? net : undefined, node: networked ? net : undefined, waitMs: 200, pollMs: 10 })
-  const front = new LookupFront({ ls: m.ls, host, prices: parsePrices(prices), wallet, receiver, headers: chain.tracker, sessions, budget, responses, gate })
+  const front = new LookupFront({ ...bboxRoute(m.ls), host, prices: parsePrices(prices), wallet, receiver, headers: chain.tracker, sessions, budget, responses, gate })
   const server = await front.listen(0, '127.0.0.1')
   servers.push(server)
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, server, receiver, wallet: new PayingWallet(client.key, chain), client, chain, env: read.id('hex'), front, host, net, gate, signatures: () => signatures }

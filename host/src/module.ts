@@ -24,7 +24,7 @@
  *   BBOX_SESSION_TTL      seconds an idle BRC-104 session is kept; default 600
  *   BBOX_HANDSHAKES_PER_SEC, BBOX_HANDSHAKE_BURST
  *                         the BRC-104 handshakes a second the terms route
- *                         answers, and at once; default 4 and 8 (budget.ts)
+ *                         answers, and at once; default 4 and 8 (bcommon host)
  *   BBOX_HANDSHAKES_PER_ADDR_PER_SEC, BBOX_HANDSHAKE_ADDR_BURST
  *                         the same for one remote address; default 1 and 4
  *   BBOX_ARCADE_URL       arcade, which the host broadcasts payments through
@@ -53,13 +53,24 @@ import { Transaction, Utils } from '@bsv/sdk'
 import type { Server } from 'node:http'
 import { PrivateKey, ProtoWallet } from '@bsv/sdk'
 import type { Module, ModuleHost } from '@lightwebinc/bcommon'
-import { gateFor, parseAcceptConfig, type AcceptConfig } from './accept.js'
+import {
+  DefaultBudget,
+  DefaultMaxSessions,
+  DefaultResponseBudget,
+  DefaultSessionTTL,
+  LedgerReceiver,
+  LookupFront,
+  gateFor,
+  parseAcceptConfig,
+  type AcceptConfig,
+  type BudgetConfig,
+  type ResponseBudgetConfig,
+} from '@lightwebinc/bcommon/host'
 import { DefaultMaxBEEF } from './beef.js'
-import { DefaultBudget, DefaultResponseBudget, type BudgetConfig, type ResponseBudgetConfig } from './budget.js'
 import { LookupService, TopicPrefix, checkOffice, topic } from './boxrec.js'
 import { FileJournal, type Journal } from './journal.js'
 import { BboxLookupService, FloorDays } from './ls_bbox.js'
-import { DefaultMaxSessions, DefaultSessionTTL, HeaderTracker, LedgerReceiver, LookupFront, parsePrices } from './paid.js'
+import { HeaderTracker, Ledger, bboxRoute, parsePrices } from './paid.js'
 import { AdmitKinds, BboxTopicManager, Reasons } from './tm_bbox.js'
 
 /**
@@ -218,7 +229,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
   let front: LookupFront | undefined
   const headers = c.headersURL === undefined ? undefined : new HeaderTracker(c.headersURL)
   const accept = c.accept ?? parseAcceptConfig('BBOX', {})
-  const receiver = c.listen !== undefined && priced.size > 0 ? new LedgerReceiver(c.stateDir) : undefined
+  const receiver = c.listen !== undefined && priced.size > 0 ? new LedgerReceiver(c.stateDir, Ledger) : undefined
   const gate = receiver !== undefined && headers !== undefined ? gateFor('bbox', host, headers, accept, c.stateDir) : undefined
   if (gate !== undefined && receiver !== undefined) {
     for (const f of receiver.fast) {
@@ -231,7 +242,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
   }
   if (c.listen !== undefined) {
     front = new LookupFront({
-      ls,
+      ...bboxRoute(ls),
       host,
       prices: c.prices,
       wallet: c.payeeKey === undefined ? undefined : new ProtoWallet(c.payeeKey),
@@ -290,4 +301,5 @@ export default async function create(host: ModuleHost): Promise<Module> {
 
 export { BboxTopicManager, Refused } from './tm_bbox.js'
 export { BboxLookupService } from './ls_bbox.js'
-export { LookupFront, termsDocument } from './paid.js'
+export { LookupFront } from '@lightwebinc/bcommon/host'
+export { termsDocument } from './paid.js'
