@@ -48,16 +48,17 @@ import {
 } from '@lightwebinc/bcommon/host'
 import { Ledger, bboxRoute, parsePrices, termsDocument } from './paid.js'
 
+import { PaymentProtocol } from './payment.js'
+import { TestNetwork } from './testnetwork.js'
+import { Chain, Party, PayingWallet, carrier, commitment, envelopeRecord, fromNowhere, fundingTree, receiptRecord } from './testmint.js'
+import { FakeHost, MemoryStorage, quietConsole } from './testutil.js'
+
 /** bbox's ledger: the shared receiver in the layout bbox writes. */
 class LedgerReceiver extends SharedLedger {
   constructor(dir: string) {
     super(dir, Ledger)
   }
 }
-import { PaymentProtocol } from './payment.js'
-import { TestNetwork } from './testnetwork.js'
-import { Chain, Party, PayingWallet, carrier, commitment, envelopeRecord, fromNowhere, fundingTree, receiptRecord } from './testmint.js'
-import { FakeHost, MemoryStorage, quietConsole } from './testutil.js'
 
 const office = 'example_office_qzxkvbmwtr'
 const topic = `tm_bbox_${office}`
