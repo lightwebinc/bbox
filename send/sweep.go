@@ -303,7 +303,7 @@ func (e *Engine) FinishSweep(ctx context.Context) error {
 		tx.MerklePath = mp
 	}
 	if changed, err := e.current(ctx, tx); err == nil && changed {
-		// A sweep mined again after a reorganisation: its current proof.
+		// A sweep mined again after a reorganization: its current proof.
 		sw.BumpHex, sw.Height = tx.MerklePath.Hex(), tx.MerklePath.BlockHeight
 		if err := e.St.Save(); err != nil {
 			return err

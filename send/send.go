@@ -93,7 +93,7 @@ type Options struct {
 // a host off the plane learns of a sweep only by receiving it. Reader
 // confirms, by lookup, a host that admitted nothing, and on the plane that
 // the hosts named hold what the facade took. Headers, when set, are the
-// publisher's own block headers: a kept proof a reorganisation left stale
+// publisher's own block headers: a kept proof a reorganization left stale
 // is replaced by the node's current one before it is used.
 type Legs struct {
 	Settler publish.Settler
@@ -422,7 +422,7 @@ func (e *Engine) promoteAhead() error {
 }
 
 // reproveTree holds a funding tree's kept proof to the publisher's headers
-// and, when a reorganisation left it stale, replaces it with the node's
+// and, when a reorganization left it stale, replaces it with the node's
 // current one, in the home too: a carrier carrying a proof of an orphaned
 // block is refused by every host.
 func (e *Engine) reproveTree(ctx context.Context, tree *transaction.Transaction) error {

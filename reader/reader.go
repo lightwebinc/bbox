@@ -159,7 +159,7 @@ func Verify(ctx context.Context, beef []byte, office string, want boxrec.TxKind,
 }
 
 // A host stores a carrier with the proof of its funding tree it was given,
-// and cannot take a new one: after a reorganisation the stored proof may
+// and cannot take a new one: after a reorganization the stored proof may
 // name a block that is no longer in the best chain, although the same
 // funding tree was mined again elsewhere (spec section 8.2). A reader then
 // fetches the tree's current proof from a chain source by its txid, and

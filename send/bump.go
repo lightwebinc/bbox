@@ -17,7 +17,7 @@ func Minimal(mp *transaction.MerklePath, txid *chainhash.Hash) (*transaction.Mer
 
 // current gives tx a proof that verifies against the publisher's own
 // headers. The proof a home keeps is the one the node gave when the
-// transaction mined; after a reorganisation it may name a block that is no
+// transaction mined; after a reorganization it may name a block that is no
 // longer in the best chain, although the same transaction was mined again
 // elsewhere (docs/spec.md section 8.2). A kept proof that no longer
 // verifies is replaced by the transaction's current proof from the node,
