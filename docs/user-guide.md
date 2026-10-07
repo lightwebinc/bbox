@@ -32,13 +32,19 @@ history (section 9).
 
 ## 2. Install
 
+- **Go**: `go install github.com/lightwebinc/bbox/cmd/bbox@latest` (Go
+  1.27.1 or later).
+- **Release tarball**: a static binary for linux or darwin, amd64 or arm64,
+  with `SHA256SUMS`, from the
+  [releases page](https://github.com/lightwebinc/bbox/releases).
 - **Container image**: `ghcr.io/lightwebinc/bbox` (the command),
   `ghcr.io/lightwebinc/bbox-host` (a host), and
-  `ghcr.io/lightwebinc/bbox-devchain` (a local chain for trying things).
-  Mount a named volume at `/home/nonroot/.bbox` and pass settings as
-  `BBOX_<KEY>` variables.
-- **From source**: `make bbox` builds `bin/bbox` (Go 1.27.1 or later). The
-  only direct dependencies are go-sdk and bcommon, both pinned.
+  `ghcr.io/lightwebinc/bbox-devchain` (a local regtest chain for
+  development); `make docker-build` builds them from a checkout. Mount a
+  named volume at `/home/nonroot/.bbox` and pass settings as `BBOX_<KEY>`
+  variables ([configuration.md](configuration.md)).
+- **From source**: `make bbox` builds `bin/bbox`. The only direct
+  dependencies are go-sdk and bcommon, both pinned.
 
 `bbox -version` prints the version. `bbox doctor` reads your settings and
 home and asks every configured endpoint whether it answers; it changes
@@ -70,21 +76,24 @@ envelopes, or your questions, to a server nobody configured.
 
 ```text
 # ~/.bbox/config
-network      = test
+network      = main
 office       = support_qzxkvbmwtr
-asset        = http://192.0.2.10:8090
-settle       = arcade:https://arcade.example.com
+asset        = https://node.example.com
+settle       = arcade:https://arc.example.com/v1
 facade       = https://host-a.example.com
 hosts        = https://host-a.example.com,https://host-b.example.com
-header_url   = https://headers.example.com
+header_url   = woc:main
 history_host = https://terms.host-a.example.com
 ```
 
-`asset` is a node's asset API (proofs, the tip, raw transactions);
-`settle` is where mined transactions go (`arcade:`, `rpc:` or `tcp:`);
-`header_url` is the header source every proof is checked against, and the
-one thing you should choose yourself. The full table is in
-[usage.md](usage.md).
+`asset` is a Teranode node's asset API (proofs, the tip, raw
+transactions), yours or a provider's; `settle` is where mined transactions
+go (`arcade:` for any ARC-compatible API, `rpc:` or `tcp:`); `header_url`
+is the header source every proof is checked against, and the one thing you
+should choose yourself: `woc:main` (the public WhatsOnChain API, every
+header's work checked here) works, and your own source is better. On
+testnet set `network = test` and `header_url = woc:test`, with testnet
+endpoints. The full table is in [configuration.md](configuration.md).
 
 ## 5. Getting started
 
@@ -92,13 +101,31 @@ one thing you should choose yourself. The full table is in
 $ bbox init
 created /home/user/.bbox
 identity     02c6...9a1e
-fund address mv4r...Q8x (test)
-$ bbox fund -txid 5e1f...77ab          # a payment you made to the fund address
+fund address 1Kq3...Vb7 (main)
+```
+
+**Fund the home from your own wallet.** Send a small amount of BSV (10,000
+satoshis is a few hundred envelopes) to the fund address `init` printed,
+from any wallet you hold coin in. When the payment has one confirmation,
+import it by its txid. `fund -txid` reads the transaction and its proof
+from `asset`, checks the proof against `header_url`, and adds every output
+paying the fund address to the home's pool:
+
+```console
+$ bbox fund -txid 5e1f...77ab
+imported 1 of 1 output(s) paying 1Kq3...Vb7, 10000 sat, mined at height 970041; pool 1 output(s), 10000 sat
+$ bbox doctor                          # the pool, and every endpoint answering
 $ bbox office new support              # once, as a recipient
 office support_qzxkvbmwtr
 topic  tm_bbox_support_qzxkvbmwtr
 host   BBOX_OFFICES=support_qzxkvbmwtr
 ```
+
+`bbox fund` without `-txid` mines coinbase through a node's
+`generatetoaddress`. Coinbase: only on a regtest chain you run
+(development and tests); it is refused on `main`, and no public node
+answers it. Use it only in the development sandbox
+([QUICKSTART.md](../QUICKSTART.md)).
 
 The identity is what you give senders. The office, and the hosts that carry
 it, you tell them out of band (or in a published profile). A host operator
@@ -323,7 +350,8 @@ every endpoint answers.
 
 Common messages:
 
-- `fee input: ... no spendable output`: fund the home (`bbox fund`). If it
+- `fee input: ... no spendable output`: fund the home (send coin to the
+  fund address, then `bbox fund -txid TXID`). If it
   says coins are change not yet mined, wait for a block. If it says a
   funding tree minted ahead holds a coin and has not settled, run the
   command again: the change returns once the tree settles.
@@ -336,7 +364,7 @@ Common messages:
   from the other hosts. Look at the named host.
 - `none verifies against the header source`: every envelope the hosts
   answered was refused. Check `header_url` (`bbox doctor`) before blaming
-  the hosts; after a reorganisation set `asset` so stale proofs are
+  the hosts; after a reorganization set `asset` so stale proofs are
   replaced.
 - `1 of 2 host(s) named answer it and 2 must`: on the plane, a host named
   does not hold what you sent. It is kept, and the next command publishes
@@ -351,7 +379,10 @@ Common messages:
 
 ## 15. Where to go next
 
+- [examples.md](examples.md): commands for the common tasks.
 - [usage.md](usage.md): every command and flag.
+- [configuration.md](configuration.md): every setting.
+- [architecture.md](architecture.md): the components and the data flow.
 - [host.md](host.md): run a host, price a question, settle, back up.
 - [limits.md](limits.md): every default and cap, and why.
 - [spec.md](spec.md) and [frozen.md](frozen.md): the protocol, and what

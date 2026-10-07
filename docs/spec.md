@@ -232,7 +232,7 @@ serialized canonically. Its members:
 
 | Member | Rule |
 | --- | --- |
-| `body` | optional; the message text, UTF-8. Rendered only through a sanitiser (section 11) |
+| `body` | optional; the message text, UTF-8. Rendered only through a sanitizer (section 11) |
 | `payment` | optional; a payment made as BRC-169 section 6.1 describes: an object with `beef`, the payment transaction as Atomic BEEF (BRC-95) in standard base64; `derivationPrefix`; and `outputs`, an array with one object per output paid to the recipient, each with `outputIndex`, `derivationSuffix` and `satoshis`. The names follow BRC-169's worked example (appendix A.7); the per-output list is what BRC-29 requires ("the derivation suffix and output index for every output intended for the recipient") and what BRC-100 `internalizeAction` takes, with `from` as the sender's identity key. Field rules below |
 | `refs` | optional; an array of at most 32 references to content larger than the bound, each an object with `url` (an `https://` or BRC-26 `uhrp://` locator, a hint), `sha256` (64 lowercase hex, the SHA-256 of the bytes as fetched), `length` (their size, a non-negative safe integer) and, when the bytes are encrypted, `key` (64 lowercase hex, an AES-256 key drawn at random for that reference and never derived from an identity; the bytes are then an AES-256-GCM ciphertext with its 32-byte IV prepended and its tag appended, BRC-2's symmetric form) |
 
@@ -334,7 +334,7 @@ computes from the same signed fact.
 
 ## 6. Carriers, funding trees and derivations
 
-Everything here is bcommon's, parameterised by the values in section 6.1.
+Everything here is bcommon's, parameterized by the values in section 6.1.
 
 ### 6.1 Derivations and tags
 
@@ -1037,7 +1037,7 @@ and a receipt proves only that the recipient's key acknowledged it.
 | Content encryption | BRC-78 (protocol `message encryption`, random key id, the serialization's header); BRC-2 for the symmetric form (a 32-byte IV and the GCM tag, as go-sdk implements it) | the version bytes are go-sdk's order, which is the BRC-78 table's and not its hex example's; the header is checked by hosts against the record |
 | Sender authentication | BRC-42 derivation with BRC-43's `anyone` counterparty; BRC-48 Pay to Push Drop | lock-before, as bcommon `pushdrop` writes it; the carrier's lock and field signature under `derive(from, "envelope")` bind the record to the sender at consensus level, so BRC-33's deferred "digital signature schemes" are answered by the substrate |
 | Records never mined, kept off chain | BRC-60's non-final transaction (kept open by its sequence numbers) | a far-future lock time keeps the record off the chain; nothing is updated in place |
-| Canonical CBOR records with integer keys; unknown keys preserved | RFC 8949 section 4.2.1; BRC-174 section 3.2 (ignore unrecognised fields, preserve them when reconstructing) | one codec with every application on the same library |
+| Canonical CBOR records with integer keys; unknown keys preserved | RFC 8949 section 4.2.1; BRC-174 section 3.2 (ignore unrecognized fields, preserve them when reconstructing) | one codec with every application on the same library |
 | Record magic: prefix, type letter, version | BRC-171 section 6's header of a protocol prefix, a header version and a record type ahead of the fields | inside the CBOR record as key 0, and in the order bcommon's registry fixes (prefix, type letter, version: `"bb"`, `'e'`, `0x01`) rather than BRC-171's prefix, version, type |
 | Topic and lookup names | BRC-87 naming; BRC-22 topic managers (admittance, coins to retain); BRC-24 lookup with `output-list` answers | a random suffix per office so that unrelated users do not collide on one topic |
 | Host discovery | BRC-88 SHIP for which hosts carry an office; BRC-180 for what a named domain hosts | none |

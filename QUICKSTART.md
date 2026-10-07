@@ -1,11 +1,77 @@
 # Quickstart
 
+Two ways in. **On a real network** (mainnet or testnet) you fund a home
+from your own wallet and use overlay hosts that carry an office. **In the
+development sandbox** everything runs on one machine over a private regtest
+chain, and no coin is needed.
+
+## On mainnet or testnet
+
+You need the `bbox` command (`go install
+github.com/lightwebinc/bbox/cmd/bbox@latest`, or a release tarball), a
+wallet holding a little BSV (testnet coin for `-network test`), and four
+endpoints, which have no defaults on purpose:
+
+| Setting | What it is |
+| --- | --- |
+| `hosts` (and `facade` on the multicast plane) | overlay hosts that carry your office: run your own with the `bbox-host` image ([docs/host.md](docs/host.md)), or use a provider's |
+| `header_url` | the header source every proof is checked against: `woc:main` (or `woc:test`) works; your own is better |
+| `asset` | a Teranode node's asset API (proofs, raw transactions, the tip): your own node or a provider's |
+| `settle` | where mined transactions go: `arcade:<url>` (any ARC-compatible API), `rpc:<url>` or `tcp:<host:port>` |
+
+Write them in `~/.bbox/config` (every key is in
+[docs/configuration.md](docs/configuration.md)):
+
+```text
+network    = main
+office     = support_qzxkvbmwtr
+mode       = unicast
+hosts      = https://host-a.example.com,https://host-b.example.com
+header_url = woc:main
+asset      = https://node.example.com
+settle     = arcade:https://arc.example.com/v1
+```
+
+Then: create a home, send coin from your own wallet to the fund address it
+prints, and import that payment by its txid once it has one confirmation.
+
+```console
+$ bbox init
+created /home/user/.bbox
+identity     02c6...9a1e
+fund address 1Kq3...Vb7 (main)
+$ bbox fund -txid 5e1f...77ab
+imported 1 of 1 output(s) paying 1Kq3...Vb7, 10000 sat, mined at height 970041; pool 1 output(s), 10000 sat
+$ bbox doctor
+$ bbox send 03a1...77c2 -m 'hello from bbox'
+$ bbox list
+$ bbox read
+$ bbox ack -all
+```
+
+**What it costs.** bbox pays 1 sat/byte, above the 100 sat/KB miner floor
+on mainnet. A 32-output funding tree is about 1,700 bytes, so about 1,700
+satoshis, about 53 an envelope or a receipt; a sweep is one small
+transaction. 10,000 satoshis is a few hundred envelopes. Reading is free.
+
+**Testnet.** The same, with `network = test`, `header_url = woc:test`,
+testnet endpoints for `asset` and `settle`, and testnet coin from a faucet
+or your testnet wallet. The fund address is then a testnet address
+(`m...` or `n...`).
+
+[docs/user-guide.md](docs/user-guide.md) explains every step, and
+[docs/examples.md](docs/examples.md) has commands for the common tasks.
+
+## Development sandbox: a private regtest chain, no coin needed
+
 In about five minutes, on one machine: run two overlay hosts that carry an
 office, send a message to both in unicast mode, read it and acknowledge it,
 send a payment inside a message and take it into the recipient's wallet,
 pay a host's 402 for the priced history question, and settle that payment
-as the host's payee. No coin is needed, because a local chain stands in for
-the network; the last section says what changes on the real one.
+as the host's payee. No coin is needed, because a local regtest chain
+(`bbox-devchain`) stands in for the network and the homes are funded by
+mining coinbase on it. **Coinbase: only on a regtest chain you run
+(development and tests).** Nothing mined here is money.
 
 You need [Docker](https://docs.docker.com/get-docker/) with Compose, and
 this repository (or just its `deploy/quickstart/compose.yaml`).
@@ -25,7 +91,7 @@ flowchart LR
   HB -->|headers| C
 ```
 
-## 1. Start the local chain
+### 1. Start the local chain
 
 ```console
 $ cd deploy/quickstart
@@ -45,11 +111,11 @@ The images are `ghcr.io/lightwebinc/bbox`, `bbox-host` and
 `make docker-build` and `make docker-build-host REFERENCE_HOST_IMAGE=<the
 reference overlay host image>`.
 
-## 2. Three identities, an office, the payee key
+### 2. Three identities, an office, the payee key
 
 ```console
-$ as alice init && as alice fund
-$ as bob init | tee bob.txt && as bob fund
+$ as alice init && as alice fund           # coinbase: regtest sandbox only
+$ as bob init | tee bob.txt && as bob fund # coinbase: regtest sandbox only
 created /home/nonroot/.bbox/bob
 identity     03a1…77c2
 fund address mw3q…Xk9 (regtest)
@@ -64,14 +130,16 @@ $ as payee payee key -out - >> .env
 ```
 
 `init` made an identity key: bob's is his address, the key a sender seals
-to. `fund` mined 101 blocks to each fund address, so one block's coin is
-mature. The office's name gets a random suffix, so nobody else's office
+to. `fund` with no `-txid` mined 101 blocks of coinbase to each fund
+address on the sandbox chain, so one block's coin is mature. Coinbase:
+only on a regtest chain you run (development and tests); on a real network
+you fund with `bbox fund -txid` instead. The office's name gets a random suffix, so nobody else's office
 shares its topic, and the `host` line is what a host needs to carry it.
 The payee is the identity host-a is paid to for the history question; its
 key goes to host-a as `BBOX_PAYEE_KEY`. `.env` hands both lines to the
 hosts, and the office to the `bbox` service.
 
-## 3. Start two hosts
+### 3. Start two hosts
 
 ```console
 $ docker compose up -d
@@ -83,10 +151,10 @@ host        http://host-b:8080 answering
 history     http://host-a:8090 serves terms (2 priced class(es))
 ```
 
-The first start takes a few seconds while MySQL initialises; run `doctor`
+The first start takes a few seconds while MySQL initializes; run `doctor`
 again until both hosts answer.
 
-## 4. Send, list, read, acknowledge
+### 4. Send, list, read, acknowledge
 
 ```console
 $ as alice send $BOB -m 'hello bob, from the quickstart' | tee sent.txt
@@ -117,7 +185,7 @@ receipt, and neither host answers the envelope to the free questions again.
 Exit status is `0` done, `1` refused, `2` a usage or transport error, `3`
 incomplete (the hosts disagree).
 
-## 5. A payment inside a message
+### 5. A payment inside a message
 
 ```console
 $ as alice send $BOB -m 'for the coffee' -pay 5000 | tee paid.txt
@@ -134,7 +202,7 @@ timing, its outputs against the key bob derives, its proof), broadcast it,
 waited for it to mine, added it to bob's pool, and acknowledged the
 message.
 
-## 6. The priced question, and the payee
+### 6. The priced question, and the payee
 
 ```console
 $ as bob terms
@@ -157,7 +225,7 @@ payment and did not broadcast it; until the payee settles it, bob could
 still spend those coins elsewhere. `payee settle` took it into the payee's
 wallet: checked, broadcast, mined, pooled.
 
-## 7. Retract
+### 7. Retract
 
 ```console
 $ as alice send $BOB -m 'take this back' | tee gone.txt
@@ -170,18 +238,18 @@ $ as bob list
 transaction, and sent it to both hosts: neither answers the message again.
 Retraction reaches honest hosts only: it is not erasure.
 
-## 8. Clean up
+### 8. Clean up
 
 ```console
 $ docker compose --profile cli down -v
 ```
 
-## On a real network
+### From the sandbox to a real network
 
 - **The chain.** Point `asset`, `settle` and `header_url` at a node, a
   settlement leg and a header source you trust, set `network`, and fund
-  each home with `bbox fund -txid` from a payment to its fund address
-  (docs/usage.md). Every carrier, receipt and sweep is then paid for: a
+  each home with `bbox fund -txid` from a payment you send from your own
+  wallet to its fund address (the first section of this page). Every carrier, receipt and sweep is then paid for: a
   funding tree of 32 outputs costs a few thousand satoshis, and a sweep is
   one small transaction.
 - **The plane.** With a multicast plane, set `mode = plane` and `facade`:

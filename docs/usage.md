@@ -33,7 +33,8 @@ Go 1.27.1 or later, or Docker.
 ```console
 $ make bbox              # bin/bbox
 $ go build ./cmd/bbox    # or directly
-$ make docker-build      # ghcr.io/lightwebinc/bbox and bbox-devchain, locally
+$ make docker-build      # ghcr.io/lightwebinc/bbox and bbox-devchain (regtest, development), locally
+$ go install github.com/lightwebinc/bbox/cmd/bbox@latest
 ```
 
 In the image the home is `/home/nonroot/.bbox`; mount a named volume there
@@ -45,8 +46,8 @@ variables.
 | Command | Needs a home | Needs | What it does |
 | --- | --- | --- | --- |
 | `init` | creates it | nothing | identity key and empty coin pool; prints the identity (the address senders seal to) and the fund address |
-| `fund -txid TXID` | yes | `asset`, `header_url` | imports a mined payment to the fund address, once its proof checks |
-| `fund [-blocks N]` | yes | `rpc`, `asset` | mines coinbase to the fund address through `generatetoaddress`: a chain you run. Refused on network `main` |
+| `fund -txid TXID` | yes | `asset`, `header_url` | imports a payment you sent from your own wallet to the fund address, once it is mined and its proof checks: how a home on mainnet or testnet is funded |
+| `fund [-blocks N] [-batch N] [-rescan]` | yes | `rpc`, `asset` | coinbase: only on a regtest chain you run (development and tests). Mines coinbase to the fund address through `generatetoaddress`, or with `-rescan` re-reads recent blocks for coinbase the pool lacks. Refused on network `main` |
 | `office new <name>` | optional | nothing | draws the 10-letter random suffix; prints the office, its topic, and the host's `BBOX_OFFICES` line |
 | `office list` | yes | nothing | the offices this home created |
 | `send <recipient> [box]` | yes | `office`, `settle`, `asset`; `facade` (plane) or `hosts` and `header_url` (unicast) | seals a message, with an optional payment and references, and publishes it |
@@ -70,73 +71,14 @@ display order. `bbox <command> -h` prints a command's flags.
 ## Configuration
 
 Settings come from, highest first: the global flags, `BBOX_<KEY>` in the
-environment (the key in upper case), the config file, and the defaults. The
-config file is `-config PATH`, else `$BBOX_HOME/config`, else
-`$XDG_CONFIG_HOME/bbox/config`, else `~/.bbox/config`. Its grammar is one
-`key = value` per line, `#` comments, blank lines ignored; a key it does not
-define, a key given twice, or a line without `=` is an error, never
-ignored.
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `accept_payer_limit` | the threshold | satoshis one sender may have taken fast and not yet mined (`internalize`); past it a payment waits for its block |
-| `accept_threshold_sats` | 25000000 | the largest payment `internalize` takes on the network's acceptance; above it, it waits for its block |
-| `accept_total_limit` | ten thresholds | the same across every sender |
-| `accept_watch` | `0s` | how long `internalize` watches for a conflict after arcade's acceptance |
-| `accept_window` | `1h` | how long a fast payment counts against the limits unless it mines first |
-| `arcade_key` | none | bearer token for an arcade installation named in `settle` |
-| `asset` | none | the node's asset API base URL: proofs, the chain tip, blocks, raw transactions |
-| `box` | none | the box `send` addresses and `list`, `read` ask about when none is named. None: `send` uses `inbox`, and `list` and `read` ask about every box |
-| `facade` | none | mode `plane`: the overlay host a publisher submits to (its `/submit` route), from which the plane delivers to every subscribed host. Refused in mode `unicast` |
-| `header_url` | none | the header source every proof is checked against: an overlay bridge's base URL (native `/v1/root/<height>` and `/v1/tip`), `woc:main`, `woc:test` or `chaintracks:URL` |
-| `history_host` | none | the base URL of `ls_bbox` on the host `history` asks and `terms` reads: the host's terms route (spec section 7.4). An origin, with no path: BRC-104 authenticates at the origin's `/.well-known/auth`, and the route answers `/lookup` and `/ls_bbox/terms` at its root |
-| `home` | `~/.bbox` | the identity's home |
-| `hosts` | none | the overlay hosts, comma separated, at most 16: every host a reader asks and compares; in mode `unicast` every host a publisher submits to; in mode `plane` the hosts other than `facade` a sweep is also sent to directly |
-| `mode` | `plane` | `plane` or `unicast`: how a publisher's objects reach the hosts (spec section 9) |
-| `network` | `main` | `main`, `test` or `regtest`: the fund address prefix and the header source's proof-of-work floor |
-| `object_bound` | `1048576` | the plane's object bound in bytes, at most 8388608; a carrier whose BEEF is larger is not published |
-| `office` | none | the office identifier a command uses when it names none |
-| `originator` | `bbox` | the BRC-100 originator presented to the wallet |
-| `quorum` | `all` | how many of `hosts` must hold a carrier (an envelope or a receipt) for it to count as published: `all`, `majority`, `one`, or a number up to the host count. In unicast a host that took it counts; on the plane a host that answers it by lookup does. A sweep always needs every host |
-| `rpc` | none | the node's JSON-RPC URL (`fund`) |
-| `rpc_pass`, `rpc_user` | `bitcoin` | the node's basic auth, also for `settle = rpc:` |
-| `settle` | none | the settlement leg for what is mined (funding trees, sweeps, a payment a recipient or a payee takes): `tcp:<host:port>` (bare EF to an ingress), `rpc:<url>` (a node's `sendrawtransaction`) or `arcade:<url>` |
-| `timeout` | `15s` | bounds each request; `1s` to `5m` |
-| `tree_count` | `32` | outputs of a new funding tree, 1 to 1000 |
-
-Global flags, before the command: `-config PATH`, `-home DIR`,
-`-hosts URLS`, `-header-url SOURCE`, `-mode MODE`, `-network NET`,
-`-office OFFICE`, `-quorum Q`, `-timeout DUR`, `-v` (also accepted after
-the command), `-version`.
-
-Every limit on these settings and on the flags below, with its reason, is
-in [limits.md](limits.md). A cap is refused with exit 2 and a message
-naming the limit; a recommendation passed prints `warning: ...` and goes
-on. The addresses have no default on purpose: a default would send an
-envelope, or a question, to a server nobody configured. A command that
-needs one and finds none exits 2 naming the key.
-
-A sender's and reader's config file, with documentation addresses:
-
-```text
-# ~/.bbox/config
-network      = test
-office       = support_qzxkvbmwtr
-asset        = http://192.0.2.10:8090
-settle       = rpc:http://192.0.2.10:9292
-facade       = https://host-a.example.com
-hosts        = https://host-a.example.com,https://host-b.example.com
-header_url   = https://headers.example.com
-history_host = https://terms.host-a.example.com
-```
-
-The same without the plane, submitting to both hosts itself:
-
-```text
-mode         = unicast
-hosts        = https://host-a.example.com,https://host-b.example.com
-quorum       = all
-```
+environment, the config file (`~/.bbox/config` by default), and the
+defaults. The addresses (hosts, facade, header source, node, settlement
+leg) have no default on purpose: a default would send an envelope, or a
+question, to a server nobody configured, so a command that needs one and
+finds none exits 2 naming the key. Every key, flag and variable, with its
+default, and example files for mainnet, testnet and unicast, are in
+[configuration.md](configuration.md). Every limit on these settings and on
+the flags below, with its reason, is in [limits.md](limits.md).
 
 ## Exit codes
 
@@ -153,9 +95,9 @@ quorum       = all
 $ bbox init
 created /home/user/.bbox
 identity     02c6...9a1e
-fund address mv4r...Q8x (test)
-$ bbox fund -txid 5e1f...77ab
-imported 1 of 1 output(s) paying mv4r...Q8x, 100000 sat, mined at height 1702; pool 1 output(s), 100000 sat
+fund address 1Kq3...Vb7 (main)
+$ bbox fund -txid 5e1f...77ab        # after sending coin from your own wallet to 1Kq3...Vb7
+imported 1 of 1 output(s) paying 1Kq3...Vb7, 10000 sat, mined at height 970041; pool 1 output(s), 10000 sat
 ```
 
 The home (mode 0700) holds the identity key (`identity.json`), the coin
@@ -165,9 +107,12 @@ wallet is opened: the coin pool is read whole and written back whole, so a
 pool read before the lock could put back coins another command spent. The identity key is the
 recipient's address: a sender seals to it, and a host indexes by it. The
 fund address is the home's funding key (`[1, "bbox message"]`, key id
-`fund`) for the configured network; `fund -blocks` mines to it on a chain
-you run, and refuses a mainnet address on a test network and every
-network `main`.
+`fund`) for the configured network: a mainnet address on `main`, a
+testnet address on `test` and `regtest`. A home is funded by sending coin
+from your own wallet to it and importing the payment with `fund -txid`.
+`fund -blocks` mines coinbase to it (coinbase: only on a regtest chain you
+run, for development and tests), and refuses a mainnet address on a test
+network and every network `main`.
 
 The state is written before anything leaves the machine. A carrier is
 persisted, with the funding output it spends marked used, before it is
@@ -225,7 +170,7 @@ the tree was adopted would leave a tree only that wallet knows.
 The proof a home keeps of a funding tree is the one the node gave when it
 mined. When `header_url` is set, the kept proof is checked against it
 before an output of the tree is spent or swept; one that no longer
-verifies (a reorganisation mined the tree again elsewhere) is replaced by
+verifies (a reorganization mined the tree again elsewhere) is replaced by
 the tree's current proof from `asset`, in the home too.
 
 ## Offices
@@ -340,7 +285,7 @@ before it is shown: the host's own admission rules, including the BRC-169
 envelope's signature and the encrypted payload's header; SPV through its
 funding tree against `header_url`; the office; and the recipient. A proof
 of the funding tree that a host stored and that no longer verifies (a
-reorganisation mined the tree again elsewhere) is replaced by the tree's
+reorganization mined the tree again elsewhere) is replaced by the tree's
 current proof from `asset`, when one is configured, and verified against
 `header_url` like any other; without `asset` such an answer is refused.
 What one page and one walk hold is bounded whatever a host answers: at

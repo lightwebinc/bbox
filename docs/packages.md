@@ -122,7 +122,7 @@ published; a run that stops part way publishes the same bytes at the next
   (`Engine.Receipt`).
 - Nothing here renders. A body, a reference's locator and every member of
   an application's own member are text someone else wrote; they pass
-  through a sanitiser before display (spec section 11).
+  through a sanitizer before display (spec section 11).
 
 ## Versions
 
@@ -139,10 +139,10 @@ bbox pins go-sdk at exactly v1.7.1 and bcommon at the version in its
 its own pin and bbox's, so an importer that needs the same bytes pins the
 same versions and asserts them, as bbox's `make deps-check` does.
 
-## Importing a private module
+## Importing while the repository is private
 
-The repository is private. The public Go proxy and checksum database cannot
-see it, so the `go` command has to be told to go to the repository directly,
+While the repository is private, the public Go proxy and checksum database
+cannot see it, so the `go` command has to be told to go to the repository directly,
 and needs credentials for it:
 
 ```console
