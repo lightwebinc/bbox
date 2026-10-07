@@ -14,12 +14,12 @@ flowchart LR
   S -->|"or: submit to each host (unicast)"| HA
   F -->|"multicast plane"| HA["host A<br/>tm_bbox_office, ls_bbox"]
   F -->|"multicast plane"| HB["host B<br/>tm_bbox_office, ls_bbox"]
-  S -->|"funding trees, sweeps"| L["settlement leg<br/>arcade, rpc or tcp"]
+  S -->|"funding trees, sweeps"| L["settlement leg<br/>arcade (default), arc, rpc or tcp"]
   L --> C[("BSV chain")]
   R["bbox (recipient)"] -->|"lookup, every host"| HA
   R -->|lookup| HB
-  R -->|"headers"| H["header source<br/>woc:main or your own"]
-  R -->|"proofs, raw transactions"| N["node asset API"]
+  R -->|"headers"| H["header source<br/>woc:main (default) or your own"]
+  R -->|"proofs, raw transactions"| N["chain view<br/>woc:main (default) or your node"]
   R -->|"BRC-104, 402, BRC-29"| T["terms route<br/>(priced history)"]
 ```
 
@@ -33,7 +33,7 @@ flowchart LR
 | Local chain | `cmd/devchain` | a regtest stand-in node and header source for the development sandbox and tests; coinbase only on this chain |
 
 The shared building blocks (the embedded wallet and coin pool, minting,
-the node and header clients, the facade and settlement legs, payment
+the chain view and header clients, the fee policy, the facade and settlement legs, payment
 acceptance) come from [bcommon](https://github.com/lightwebinc/bcommon);
 signatures, scripts and BEEF from
 [go-sdk](https://github.com/bsv-blockchain/go-sdk).
@@ -75,8 +75,12 @@ signatures, scripts and BEEF from
   each header's work locally; your own header source is stronger.
 - **What is public.** Who wrote to whom, when, in which box and office, and
   the envelope's size. The body, any payment and any references are not.
-- **The node and settlement leg** are trusted for availability only: what
-  they return is checked (proofs against headers, transactions by txid).
+- **The chain view and settlement leg** are trusted for availability:
+  what they return is checked (proofs against headers, transactions by
+  txid). The one thing taken on their word is an absence: that an output
+  is unspent, or a transaction not known or not mined. With no node that
+  is WhatsOnChain's word; a node of your own (`chain = asset:URL`) removes
+  it.
 
 ## State
 
@@ -91,7 +95,9 @@ state directory ([host.md](host.md)).
 
 `network` is `main`, `test` or `regtest`. It sets the fund address prefix
 and the proof-of-work floor a header source is held to. On `main` and
-`test` a home is funded only by importing a payment (`fund -txid`). On
+`test` a home is funded only by importing a payment (`fund -txid` or
+`fund -beef`), and the chain services default to public ones, so no node
+is needed. On
 `regtest` (the development sandbox) a home can also be funded by mining
 coinbase; coinbase: only on a regtest chain you run (development and
 tests).

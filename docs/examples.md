@@ -1,7 +1,10 @@
 # Examples
 
-Commands for the common tasks, on a real network. They assume a config
-file with your endpoints ([configuration.md](configuration.md)); every
+Commands for the common tasks, on a real network, with no node of your
+own. They assume a config file naming your overlay hosts
+([configuration.md](configuration.md)); the header source, the chain view
+and the settlement leg default to WhatsOnChain and GorillaPool's public
+arcade; every
 key, txid, office and hostname here is illustrative. Exit codes: 0 done, 1
 refused, 2 usage or transport error, 3 incomplete (the hosts disagree).
 
@@ -14,12 +17,27 @@ identity     02c6...9a1e
 fund address 1Kq3...Vb7 (main)
 ```
 
-Send coin from your own wallet to the fund address (10,000 satoshis is a
-few hundred envelopes), wait for one confirmation, then import it:
+Send coin from your own wallet to the fund address (10,000 satoshis is
+about a thousand envelopes), wait for one confirmation, then import it:
 
 ```console
 $ bbox fund -txid 5e1f...77ab
 imported 1 of 1 output(s) paying 1Kq3...Vb7, 10000 sat, mined at height 970041; pool 1 output(s), 10000 sat
+```
+
+Or import it at once from the BEEF your wallet hands over:
+
+```console
+$ bbox fund -beef payment.beef
+imported 1 of 1 output(s) paying 1Kq3...Vb7, 10000 sat, not mined yet: held until it mines, when a later command collects its proof; pool 1 output(s), 10000 sat
+$ bbox fund -beef - < payment.hex       # from standard input, hex or binary
+```
+
+A transaction that pays someone else is refused, and adds nothing:
+
+```console
+$ bbox fund -txid 5285...5be6
+bbox: payment 5285...5be6 pays nothing to the fund address 1Kq3...Vb7
 ```
 
 Check everything at once; `doctor` reads only:
@@ -31,9 +49,9 @@ $ bbox doctor
 ## Set up a home on testnet
 
 ```console
-$ bbox -network test -header-url woc:test init
+$ bbox -network test init
 fund address mv4r...Q8x (test)
-$ bbox -network test -header-url woc:test fund -txid 9c0a...41de
+$ bbox -network test fund -txid 9c0a...41de
 ```
 
 Keep testnet in its own home so mainnet and testnet coin never mix:
@@ -45,6 +63,19 @@ with `network = test` in `~/.bbox-test/config`.
 ```console
 $ bbox -network main -header-url woc:main doctor | grep headers
 headers     woc:main tip 970055
+```
+
+## Use your own node and services
+
+Each chain service is one setting; `doctor` shows what is in force:
+
+```console
+$ bbox -chain asset:https://node.example.com doctor | grep chain
+chain       asset:https://node.example.com
+$ bbox -header-url bhs:https://headers.example.com doctor | grep headers   # header_token in the config
+$ bbox -settle arcade:https://arcade.example.com doctor | grep settle
+$ bbox -fee-source arc doctor | grep fee        # the broadcaster's published rate
+fee         100/1000 satoshis/bytes, floor 250 sat (the broadcaster's published policy)
 ```
 
 ## Create an office to receive in
@@ -131,13 +162,13 @@ $ bbox -home /srv/payee payee settle /var/lib/bbox/payments.jsonl
 
 ```console
 $ docker run --rm -v bbox-home:/home/nonroot/.bbox \
-    -e BBOX_NETWORK=main -e BBOX_HEADER_URL=woc:main \
-    ghcr.io/lightwebinc/bbox init
+    -e BBOX_NETWORK=main ghcr.io/lightwebinc/bbox init
 ```
 
 ## Try everything with no coin
 
 The development sandbox in [QUICKSTART.md](../QUICKSTART.md) runs a
 private regtest chain, two hosts and three identities on one machine. Its
-homes are funded with `bbox fund` (no `-txid`), which mines coinbase.
+homes are funded with `bbox fund` (no `-txid` or `-beef`), which mines
+coinbase.
 Coinbase: only on a regtest chain you run (development and tests).

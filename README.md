@@ -40,19 +40,21 @@ created /home/user/.bbox
 identity     02c6...9a1e
 fund address 1Kq3...Vb7 (main)
 # send about 10,000 satoshis from your own wallet to the fund address,
-# wait for one confirmation, then import that payment by its txid:
+# then import that payment by its txid once mined (or its BEEF at once):
 $ bbox fund -txid 5e1f...77ab
 imported 1 of 1 output(s) paying 1Kq3...Vb7, 10000 sat, mined at height 970041; pool 1 output(s), 10000 sat
 $ bbox send 03a1...77c2 -m 'the invoice is attached'
 $ bbox list                                  # as the recipient
 ```
 
-Every command reads its endpoints from `~/.bbox/config`
-([docs/configuration.md](docs/configuration.md)): the overlay hosts that
-carry your office, a header source (`woc:main` works), a node's asset API
-and a settlement leg. Testnet works the same with `-network test` and
-`header_url = woc:test`. An envelope costs its sender about 53 satoshis (its
-share of a 32-output funding tree at 1 sat/byte); reading is free.
+No node is needed. Every command reads the overlay hosts that carry your
+office from `~/.bbox/config` ([docs/configuration.md](docs/configuration.md));
+the chain services default to WhatsOnChain (headers, transactions, proofs,
+spends) and GorillaPool's public arcade (broadcast), and your own node or
+header service is the better option. Testnet works the same with
+`-network test`. An envelope costs its sender about 9 satoshis (its share
+of a 32-output funding tree at the network's rate of 100 satoshis per 1000
+bytes); reading is free.
 
 ## How it works
 

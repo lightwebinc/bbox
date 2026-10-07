@@ -25,8 +25,8 @@ is encrypted to you), or answer one you acknowledged as if it were still
 open. What is public: who wrote to whom, when, in which box, and how large
 the envelope is.
 
-What it costs: a sender pays about 53 satoshis an envelope at the default
-fee (its share of a funding tree); a recipient pays the same for a receipt;
+What it costs: a sender pays about 9 satoshis an envelope at the default
+fee, the network's rate (its share of a funding tree); a recipient pays the same for a receipt;
 reading the box is free on every conforming host. A host may charge for
 history (section 9).
 
@@ -71,29 +71,36 @@ nothing, and is the first thing to run when something is wrong.
 Settings come from global flags, then `BBOX_<KEY>` variables, then the
 config file (`$BBOX_HOME/config`, else `~/.bbox/config`), then defaults.
 The file is one `key = value` per line; an unknown key is an error, never
-ignored. The addresses have no default: a default would send your
-envelopes, or your questions, to a server nobody configured.
+ignored. The hosts have no default: a default would send your envelopes,
+or your questions, to a server nobody configured. You need no node:
 
 ```text
 # ~/.bbox/config
 network      = main
 office       = support_qzxkvbmwtr
-asset        = https://node.example.com
-settle       = arcade:https://arc.example.com/v1
 facade       = https://host-a.example.com
 hosts        = https://host-a.example.com,https://host-b.example.com
-header_url   = woc:main
 history_host = https://terms.host-a.example.com
 ```
 
-`asset` is a Teranode node's asset API (proofs, the tip, raw
-transactions), yours or a provider's; `settle` is where mined transactions
-go (`arcade:` for any ARC-compatible API, `rpc:` or `tcp:`); `header_url`
-is the header source every proof is checked against, and the one thing you
-should choose yourself: `woc:main` (the public WhatsOnChain API, every
-header's work checked here) works, and your own source is better. On
-testnet set `network = test` and `header_url = woc:test`, with testnet
-endpoints. The full table is in [configuration.md](configuration.md).
+Three chain services have public defaults on `main` and `test`:
+
+| Key | Default | What it is |
+| --- | --- | --- |
+| `header_url` | `woc:main` | the header source every proof is checked against: the public WhatsOnChain API, every header's work checked here |
+| `chain` | `woc:main` | where transactions, proofs and spends are read: WhatsOnChain. A proof it gives must verify against your headers; its word that an output is unspent is trusted |
+| `settle` | `arcade:main` | where mined transactions go: GorillaPool's public arcade, its verdict held to the chain view's spends |
+
+Your own services are better, and each is one setting:
+`chain = asset:https://node.example.com` (a Teranode node, which removes
+the trust in WhatsOnChain's "unspent"), `header_url =
+bhs:https://headers.example.com` (a block-headers-service you run, with
+`header_token`), `settle = arcade:https://arcade.example.com` (an arcade
+you run), or `arc:`, `rpc:` and `tcp:` legs. On testnet set `network =
+test`; the defaults become `woc:test` and `arcade:test`. The miner fee is
+the network's rate, 100 satoshis per 1000 bytes (`fee_rate`), or the rate
+the broadcaster publishes (`fee_source = arc`). The full table is in
+[configuration.md](configuration.md).
 
 ## 5. Getting started
 
@@ -105,11 +112,11 @@ fund address 1Kq3...Vb7 (main)
 ```
 
 **Fund the home from your own wallet.** Send a small amount of BSV (10,000
-satoshis is a few hundred envelopes) to the fund address `init` printed,
-from any wallet you hold coin in. When the payment has one confirmation,
-import it by its txid. `fund -txid` reads the transaction and its proof
-from `asset`, checks the proof against `header_url`, and adds every output
-paying the fund address to the home's pool:
+satoshis is about a thousand envelopes) to the fund address `init`
+printed, from any wallet you hold coin in. When the payment has one
+confirmation, import it by its txid. `fund -txid` reads the transaction
+and its proof from `chain`, checks the proof against `header_url`, and
+adds every output paying the fund address to the home's pool:
 
 ```console
 $ bbox fund -txid 5e1f...77ab
@@ -121,7 +128,15 @@ topic  tm_bbox_support_qzxkvbmwtr
 host   BBOX_OFFICES=support_qzxkvbmwtr
 ```
 
-`bbox fund` without `-txid` mines coinbase through a node's
+Or, without waiting for a block, hand over the payment as the BEEF your
+wallet gives you: `bbox fund -beef payment.beef` (`-` reads standard
+input; binary or hex). It needs no lookup at all: a mined payment's proof
+is checked against `header_url`, and one not mined yet is taken when every
+transaction it spends carries a proof and its scripts verify. Its coin is
+spendable once it mines, which a later command notices by itself.
+`-mined-only` (`fund_mined_only = true`) takes mined payments only.
+
+`bbox fund` without `-txid` or `-beef` mines coinbase through a node's
 `generatetoaddress`. Coinbase: only on a regtest chain you run
 (development and tests); it is refused on `main`, and no public node
 answers it. Use it only in the development sandbox
@@ -351,7 +366,7 @@ every endpoint answers.
 Common messages:
 
 - `fee input: ... no spendable output`: fund the home (send coin to the
-  fund address, then `bbox fund -txid TXID`). If it
+  fund address, then `bbox fund -txid TXID` or `bbox fund -beef FILE`). If it
   says coins are change not yet mined, wait for a block. If it says a
   funding tree minted ahead holds a coin and has not settled, run the
   command again: the change returns once the tree settles.
@@ -364,8 +379,8 @@ Common messages:
   from the other hosts. Look at the named host.
 - `none verifies against the header source`: every envelope the hosts
   answered was refused. Check `header_url` (`bbox doctor`) before blaming
-  the hosts; after a reorganization set `asset` so stale proofs are
-  replaced.
+  the hosts; after a reorganization a configured `chain` (the default on
+  main and test) replaces stale proofs.
 - `1 of 2 host(s) named answer it and 2 must`: on the plane, a host named
   does not hold what you sent. It is kept, and the next command publishes
   it first; a lower `quorum` counts it published with fewer hosts.

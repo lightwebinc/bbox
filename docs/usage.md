@@ -46,21 +46,22 @@ variables.
 | Command | Needs a home | Needs | What it does |
 | --- | --- | --- | --- |
 | `init` | creates it | nothing | identity key and empty coin pool; prints the identity (the address senders seal to) and the fund address |
-| `fund -txid TXID` | yes | `asset`, `header_url` | imports a payment you sent from your own wallet to the fund address, once it is mined and its proof checks: how a home on mainnet or testnet is funded |
-| `fund [-blocks N] [-batch N] [-rescan]` | yes | `rpc`, `asset` | coinbase: only on a regtest chain you run (development and tests). Mines coinbase to the fund address through `generatetoaddress`, or with `-rescan` re-reads recent blocks for coinbase the pool lacks. Refused on network `main` |
+| `fund -txid TXID` | yes | `chain`, `header_url` (defaults on main and test) | imports a payment you sent from your own wallet to the fund address, once it is mined and its proof checks: how a home on mainnet or testnet is funded |
+| `fund -beef FILE\|-` | yes | `header_url` | imports that payment as the BEEF your wallet hands over, with no lookup; one not mined yet is held until it mines, or refused with `-mined-only` |
+| `fund [-blocks N] [-batch N] [-rescan]` | yes | `rpc`, `chain = asset:URL` | coinbase: only on a regtest chain you run (development and tests). Mines coinbase to the fund address through `generatetoaddress`, or with `-rescan` re-reads recent blocks for coinbase the pool lacks. Refused on network `main` |
 | `office new <name>` | optional | nothing | draws the 10-letter random suffix; prints the office, its topic, and the host's `BBOX_OFFICES` line |
 | `office list` | yes | nothing | the offices this home created |
-| `send <recipient> [box]` | yes | `office`, `settle`, `asset`; `facade` (plane) or `hosts` and `header_url` (unicast) | seals a message, with an optional payment and references, and publishes it |
+| `send <recipient> [box]` | yes | `office`; `facade` (plane) or `hosts` (unicast); `settle`, `chain`, `header_url` (defaults on main and test) | seals a message, with an optional payment and references, and publishes it |
 | `drop <txid>...` | yes | as `send` | retracts sent envelopes: sweeps their funding outputs, and publishes the sweep once it mines. Work an earlier command left unfinished does not stop it |
 | `list` | optional | `office`, `hosts`, `header_url` | the open envelopes in the inbox, one box or from one sender, from every host, compared; `-fill` copies an envelope a host lacks across to it |
 | `read [txid...]` | yes | as `list` | verifies, decrypts and prints envelopes, and records them for `ack` and `internalize` |
 | `ack <txid>...` | yes | as `send` | acknowledges envelopes read, one receipt per 64 |
-| `internalize <txid>` | yes | as `list`, and `asset`, `settle` | takes the payment inside an envelope into the wallet, then acknowledges it |
-| `history` | yes | `office`, `history_host`, `header_url`, `asset`, `settle` | the priced question: pays the host's 402 from the pool, prints what the host keeps that is no longer open; one page, or every page with `-all`. One payment a question, at most `-max-sats`, and at most `-budget` in all |
+| `internalize <txid>` | yes | as `list`, and `chain`, `settle` | takes the payment inside an envelope into the wallet, then acknowledges it |
+| `history` | yes | `office`, `history_host`, `header_url`, `chain`, `settle` | the priced question: pays the host's 402 from the pool, prints what the host keeps that is no longer open; one page, or every page with `-all`. One payment a question, at most `-max-sats`, and at most `-budget` in all |
 | `terms [URL]` | no | `history_host` or URL | prints a host's terms document |
 | `payee key -out FILE` | yes | nothing | writes `BBOX_PAYEE_KEY` for this home's identity to a new file, mode 0600 |
-| `payee settle <payments.jsonl>...` | yes, the payee's | `header_url`, `asset`, `settle` | internalizes every payment in a host's ledger this home has not: all broadcast, then awaited together (`-in-flight`) |
-| `doctor` | optional | nothing | the home's state and whether the node, headers, hosts and priced host answer; reads only |
+| `payee settle <payments.jsonl>...` | yes, the payee's | `header_url`, `chain`, `settle` | internalizes every payment in a host's ledger this home has not: all broadcast, then awaited together (`-in-flight`) |
+| `doctor` | optional | nothing | the home's state, the chain services and fee rate in force, and whether the headers, settlement leg, hosts and priced host answer; reads only |
 | `version` | no | nothing | prints the version |
 
 `<recipient>`, `-from` and `-to` are identity keys, 66 lowercase hex
@@ -72,10 +73,13 @@ display order. `bbox <command> -h` prints a command's flags.
 
 Settings come from, highest first: the global flags, `BBOX_<KEY>` in the
 environment, the config file (`~/.bbox/config` by default), and the
-defaults. The addresses (hosts, facade, header source, node, settlement
-leg) have no default on purpose: a default would send an envelope, or a
-question, to a server nobody configured, so a command that needs one and
-finds none exits 2 naming the key. Every key, flag and variable, with its
+defaults. No node is needed: on `main` and `test` the header source and
+the chain view default to WhatsOnChain (`woc:main`, `woc:test`) and the
+settlement leg to GorillaPool's public arcade (`arcade:main`,
+`arcade:test`); a node of your own (`chain = asset:URL`) is the better
+option. The hosts and the facade have no default on purpose: a default
+would send an envelope, or a question, to a server nobody configured, so a
+command that needs one and finds none exits 2 naming the key. Every key, flag and variable, with its
 default, and example files for mainnet, testnet and unicast, are in
 [configuration.md](configuration.md). Every limit on these settings and on
 the flags below, with its reason, is in [limits.md](limits.md).
@@ -100,6 +104,19 @@ $ bbox fund -txid 5e1f...77ab        # after sending coin from your own wallet t
 imported 1 of 1 output(s) paying 1Kq3...Vb7, 10000 sat, mined at height 970041; pool 1 output(s), 10000 sat
 ```
 
+Or hand over the payment as the BEEF your wallet gives you, with no lookup
+and no wait for a block:
+
+```console
+$ bbox fund -beef payment.beef
+imported 1 of 1 output(s) paying 1Kq3...Vb7, 10000 sat, not mined yet: held until it mines, when a later command collects its proof; pool 1 output(s), 10000 sat
+```
+
+An unmined payment is taken only when every transaction it spends carries
+a proof your headers hold and its scripts verify against them; its coin is
+spendable once it mines. `-mined-only` (`fund_mined_only = true`) refuses
+it instead.
+
 The home (mode 0700) holds the identity key (`identity.json`), the coin
 pool (`wallet.json`, basket `bbox fund`), the state (`state.json`) and a
 lock: one command that writes it at a time. The lock is taken before the
@@ -109,7 +126,8 @@ recipient's address: a sender seals to it, and a host indexes by it. The
 fund address is the home's funding key (`[1, "bbox message"]`, key id
 `fund`) for the configured network: a mainnet address on `main`, a
 testnet address on `test` and `regtest`. A home is funded by sending coin
-from your own wallet to it and importing the payment with `fund -txid`.
+from your own wallet to it and importing the payment with `fund -txid` or
+`fund -beef`.
 `fund -blocks` mines coinbase to it (coinbase: only on a regtest chain you
 run, for development and tests), and refuses a mainnet address on a test
 network and every network `main`.
@@ -128,7 +146,7 @@ A coin leaves `wallet.json` the moment it is taken, before the transaction
 that spends it is recorded in `state.json`. While a command that spends is
 running, the state records the pool as it stood (`taking`); a command that
 ends clears it. The next command after one that stopped in between asks
-the node about a coin in that record that neither file accounts for: one
+the chain view about a coin in that record that neither file accounts for: one
 the node shows unspent goes back in the pool, one it shows spent is
 reported, and one it cannot answer for is looked at again next time.
 
@@ -167,11 +185,11 @@ broadcasts inside one call, so there is no moment before the broadcast to
 record the tree in, and a run that stopped after the broadcast and before
 the tree was adopted would leave a tree only that wallet knows.
 
-The proof a home keeps of a funding tree is the one the node gave when it
-mined. When `header_url` is set, the kept proof is checked against it
-before an output of the tree is spent or swept; one that no longer
-verifies (a reorganization mined the tree again elsewhere) is replaced by
-the tree's current proof from `asset`, in the home too.
+The proof a home keeps of a funding tree is the one it was given when the
+tree mined. The kept proof is checked against `header_url` before an
+output of the tree is spent or swept; one that no longer verifies (a
+reorganization mined the tree again elsewhere) is replaced by the tree's
+current proof from `chain`, in the home too.
 
 ## Offices
 
@@ -286,8 +304,9 @@ envelope's signature and the encrypted payload's header; SPV through its
 funding tree against `header_url`; the office; and the recipient. A proof
 of the funding tree that a host stored and that no longer verifies (a
 reorganization mined the tree again elsewhere) is replaced by the tree's
-current proof from `asset`, when one is configured, and verified against
-`header_url` like any other; without `asset` such an answer is refused.
+current proof from `chain`, when one is configured (on main and test it
+always is), and verified against `header_url` like any other; without one
+such an answer is refused.
 What one page and one walk hold is bounded whatever a host answers: at
 most 128 outputs are taken from a page, an answer is at most 16 MiB, and a
 host whose full page does not move past its cursor is asked no further. A
@@ -500,15 +519,16 @@ $ bbox doctor
 home        /home/user/.bbox
 network     test
 office      support_qzxkvbmwtr
-node        http://192.0.2.10:8090 tip 1712
+headers     woc:test tip 1761988
+chain       woc:test
+settle      arcade:test answering
+fee         100/1000 satoshis/bytes, floor 250 sat (static)
 identity    02c6...9a1e
-pool        4 output(s), 96200 sat
+pool        4 output(s), 96200 sat, 0 immature
 tree        6a41...e3b0 27 of 32 left
 sent        3 envelope(s), 1 receipt(s), 1 sweep(s)
-headers     https://headers.example.com tip 1712
 mode        plane
 facade      https://host-a.example.com
-settle      rpc:http://192.0.2.10:9292
 host        https://host-a.example.com answering
 host        https://host-b.example.com answering
 history     https://terms.host-a.example.com serves terms (2 priced class(es))

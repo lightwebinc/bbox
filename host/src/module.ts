@@ -29,7 +29,10 @@
  *                         the same for one remote address; default 1 and 4
  *   BBOX_ARCADE_URL       arcade, which the host broadcasts payments through
  *   BBOX_ASSET_URL        the node's asset service: spend view and proofs;
- *                         without both, every payment is held until mined
+ *                         without arcade and a spend view, every payment is
+ *                         held until mined
+ *   BBOX_CHAIN            woc:main or woc:test: WhatsOnChain as the spend view
+ *                         and proofs, for a host with no node (BBOX_WOC_KEY)
  *   BBOX_ACCEPT_THRESHOLD_SATS
  *                         the largest payment answered on network acceptance;
  *                         default 25000000; above it, held until mined
@@ -284,7 +287,7 @@ export function bboxModule(host: ModuleHost, c: Config, overlayTopics?: readonly
     sessions: c.listen === undefined ? 'none' : `${c.sessions.max}, idle ${c.sessions.ttlSeconds}s`,
     handshakes: c.listen === undefined ? 'none' : `${c.handshakes.perSec}/s burst ${c.handshakes.burst}, per address ${c.handshakes.perAddressPerSec}/s burst ${c.handshakes.addressBurst}`,
     responses: c.listen === undefined ? 'none' : `${c.responses.perSec}/s burst ${c.responses.burst} a session`,
-    payments: gate === undefined ? 'none' : gate.networked ? `fast to ${accept.policy.thresholdSats} sat, payer ${accept.policy.payerLimit}, total ${accept.policy.totalLimit}` : 'held until mined (no arcade or asset URL)',
+    payments: gate === undefined ? 'none' : gate.networked ? `fast to ${accept.policy.thresholdSats} sat, payer ${accept.policy.payerLimit}, total ${accept.policy.totalLimit}` : 'held until mined (no arcade, or no asset URL or chain)',
     build,
   })
   return { module: { topics, lookups: { [LookupService]: ls } }, ls, front, start }

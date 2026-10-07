@@ -59,7 +59,9 @@ carrier.
 | `BBOX_RESPONSES_PER_SEC` | 5 | signed responses a second one BRC-104 session is given; decimals allowed |
 | `BBOX_RESPONSE_BURST` | 20 | the most signed responses one session is given at once |
 | `BBOX_ARCADE_URL` | none | arcade, which the host broadcasts each payment through before it answers (`POST /tx`, `GET /tx/<txid>`) |
-| `BBOX_ASSET_URL` | none | the node's asset service: the spend view of a payment's inputs and the proof of a held or watched payment. Without both URLs every payment is held until it mines |
+| `BBOX_ASSET_URL` | none | the node's asset service: the spend view of a payment's inputs and the proof of a held or watched payment. Without arcade and a spend view (this, or `BBOX_CHAIN`) every payment is held until it mines |
+| `BBOX_CHAIN` | none | `woc:main` or `woc:test`: WhatsOnChain as that spend view and proof source, for a host with no node; refused beside `BBOX_ASSET_URL`. Its word that an input is unspent is trusted; every proof is checked against the host's headers |
+| `BBOX_WOC_KEY` | none | a WhatsOnChain API key for `BBOX_CHAIN`, past the free tier's 3 requests a second |
 | `BBOX_ACCEPT_THRESHOLD_SATS` | 25000000 | the largest payment answered on the network's acceptance; above it a payment is held until it mines |
 | `BBOX_ACCEPT_PAYER_LIMIT` | the threshold | satoshis one payer may have answered fast and not yet mined; past it, held |
 | `BBOX_ACCEPT_TOTAL_LIMIT` | ten thresholds | the same across every payer |
@@ -306,7 +308,8 @@ checks that output 0 pays the key the home derives for the prefix, the
 suffix and the payer, verifies it against the home's headers, broadcasts it
 through the home's settlement leg, waits for its proof, adds it to the
 home's pool, and records its txid in the home as settled. It needs the
-home's `header_url`, `asset` and `settle` ([usage.md](usage.md)). One
+home's `header_url`, `chain` and `settle`, which default to WhatsOnChain
+and GorillaPool's public arcade on main and test ([usage.md](usage.md)). One
 payee serving several hosts names every host's ledger in one run (`payee
 settle a/payments.jsonl b/payments.jsonl`); a payment in two is settled
 once. Every payment is broadcast before any is waited for, so a run takes

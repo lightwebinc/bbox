@@ -9,17 +9,17 @@ chain, and no coin is needed.
 
 You need the `bbox` command (`go install
 github.com/lightwebinc/bbox/cmd/bbox@latest`, or a release tarball), a
-wallet holding a little BSV (testnet coin for `-network test`), and four
-endpoints, which have no defaults on purpose:
+wallet holding a little BSV (testnet coin for `-network test`), and the
+overlay hosts that carry your office. No node is needed.
 
 | Setting | What it is |
 | --- | --- |
-| `hosts` (and `facade` on the multicast plane) | overlay hosts that carry your office: run your own with the `bbox-host` image ([docs/host.md](docs/host.md)), or use a provider's |
-| `header_url` | the header source every proof is checked against: `woc:main` (or `woc:test`) works; your own is better |
-| `asset` | a Teranode node's asset API (proofs, raw transactions, the tip): your own node or a provider's |
-| `settle` | where mined transactions go: `arcade:<url>` (any ARC-compatible API), `rpc:<url>` or `tcp:<host:port>` |
+| `hosts` (and `facade` on the multicast plane) | overlay hosts that carry your office: run your own with the `bbox-host` image ([docs/host.md](docs/host.md)), or use a provider's. No default |
+| `header_url` | the header source every proof is checked against. Default `woc:main` (WhatsOnChain); your own block-headers-service (`bhs:URL`) is better |
+| `chain` | where transactions, proofs and spends are read. Default `woc:main`; your own node (`asset:URL`) is better |
+| `settle` | where mined transactions go. Default `arcade:main` (GorillaPool's public arcade); also `arcade:<url>`, `arc:<url>`, `rpc:<url>` |
 
-Write them in `~/.bbox/config` (every key is in
+Write the hosts in `~/.bbox/config` (every key is in
 [docs/configuration.md](docs/configuration.md)):
 
 ```text
@@ -27,13 +27,10 @@ network    = main
 office     = support_qzxkvbmwtr
 mode       = unicast
 hosts      = https://host-a.example.com,https://host-b.example.com
-header_url = woc:main
-asset      = https://node.example.com
-settle     = arcade:https://arc.example.com/v1
 ```
 
-Then: create a home, send coin from your own wallet to the fund address it
-prints, and import that payment by its txid once it has one confirmation.
+Then: install, create a home, pay the fund address it prints from your own
+wallet, import that payment, and use it.
 
 ```console
 $ bbox init
@@ -49,15 +46,22 @@ $ bbox read
 $ bbox ack -all
 ```
 
-**What it costs.** bbox pays 1 sat/byte, above the 100 sat/KB miner floor
-on mainnet. A 32-output funding tree is about 1,700 bytes, so about 1,700
-satoshis, about 53 an envelope or a receipt; a sweep is one small
-transaction. 10,000 satoshis is a few hundred envelopes. Reading is free.
+`fund -txid` waits for one confirmation. To import the payment at once,
+hand over the BEEF your wallet gives you instead: `bbox fund -beef
+payment.beef` (or `-` for standard input). Its coin is spendable once it
+mines.
 
-**Testnet.** The same, with `network = test`, `header_url = woc:test`,
-testnet endpoints for `asset` and `settle`, and testnet coin from a faucet
-or your testnet wallet. The fund address is then a testnet address
-(`m...` or `n...`).
+**What it costs.** bbox pays the network's rate, 100 satoshis per 1000
+bytes, with a floor of 250 satoshis a transaction (`fee_rate`,
+`fee_floor`). A 32-output funding tree is about 1,700 bytes and pays the
+floor, so about 9 satoshis an envelope or a receipt, its funding output
+included; a sweep is one small transaction. 10,000 satoshis is about a
+thousand envelopes. Reading is free.
+
+**Testnet.** The same, with `network = test` (the defaults become
+`woc:test` and `arcade:test`) and testnet coin from a faucet or your
+testnet wallet. The fund address is then a testnet address (`m...` or
+`n...`).
 
 [docs/user-guide.md](docs/user-guide.md) explains every step, and
 [docs/examples.md](docs/examples.md) has commands for the common tasks.
