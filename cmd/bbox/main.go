@@ -86,9 +86,9 @@ global flags:
                       and in mode unicast every host a publisher submits to
   -chain SPEC         chain view: woc:main, woc:test or asset:<node URL>
                       (default woc:<network>; no node needed)
-  -fee-floor SATS     least fee a transaction pays (default 250)
-  -fee-max-rate RATE  most a fee rate may be, SATS/BYTES (with -fee-source
-                      arc, default 1/1)
+  -fee-floor SATS     least fee a transaction pays (default 100)
+  -fee-max-rate RATE  most a fee rate may be, SATS/BYTES (default
+                      100/1000)
   -fee-rate RATE      miner fee rate, SATS/BYTES (default 100/1000)
   -fee-source SRC     static (default) or arc: the broadcaster's published
                       policy, held to -fee-max-rate

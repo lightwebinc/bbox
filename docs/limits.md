@@ -141,8 +141,9 @@ sender at the cap of 20 envelopes a second is a small part of a subscriber
 budget of hundreds of objects a second; the default of 1 leaves room for many
 senders on one office.
 
-**Cost.** At a fee of 1 satoshi per byte a 32-output funding tree costs about
-1,700 satoshis, about 53 an envelope; an envelope's carrier itself is never
+**Cost.** At the network's rate of 100 satoshis per 1000 bytes a 32-output
+funding tree of about 1,700 bytes costs about 170 satoshis, about 6 an
+envelope with its funding output; an envelope's carrier itself is never
 mined. A host's delivered bytes are what an office costs its hosts, which is
 why the content default is small.
 

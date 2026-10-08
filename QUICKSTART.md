@@ -52,11 +52,11 @@ payment.beef` (or `-` for standard input). Its coin is spendable once it
 mines.
 
 **What it costs.** bbox pays the network's rate, 100 satoshis per 1000
-bytes, with a floor of 250 satoshis a transaction (`fee_rate`,
+bytes, with a floor of 100 satoshis a transaction (`fee_rate`,
 `fee_floor`). A 32-output funding tree is about 1,700 bytes and pays the
-floor, so about 9 satoshis an envelope or a receipt, its funding output
-included; a sweep is one small transaction. 10,000 satoshis is about a
-thousand envelopes. Reading is free.
+rate on its size, about 170 satoshis, so about 6 satoshis an envelope or a receipt, its funding output
+included; a sweep is one small transaction. 10,000 satoshis is about
+fifteen hundred envelopes. Reading is free.
 
 **Testnet.** The same, with `network = test` (the defaults become
 `woc:test` and `arcade:test`) and testnet coin from a faucet or your

@@ -97,9 +97,9 @@ on a regtest chain you run, for development and tests).
 | `box` | none | the box `send` addresses and `list`, `read` ask about when none is named. None: `send` uses `inbox`, and `list` and `read` ask about every box |
 | `chain` | `woc:<network>` on main and test | the chain view transactions, proofs and spends are read from: `woc:main`, `woc:test`, `asset:<node URL>`, or a list (see [Chain services](#chain-services)). Needed by `fund -txid` and every command that publishes or takes a payment |
 | `facade` | none | mode `plane`: the overlay host a publisher submits to (its `/submit` route), from which the plane delivers to every subscribed host. Refused in mode `unicast` |
-| `fee_dust` | `250` | the least change kept as an output, in satoshis; less goes to the fee |
-| `fee_floor` | `250` | the least fee one transaction pays, in satoshis |
-| `fee_max_rate` | none; `1/1` with `fee_source = arc` | the most a fee rate may be, `SATS/BYTES`: a rate above it, configured or published, is lowered to it |
+| `fee_dust` | `100` | the least change kept as an output, in satoshis; less goes to the fee |
+| `fee_floor` | `100` | the least fee one transaction pays, in satoshis |
+| `fee_max_rate` | `100/1000` | the most a fee rate may be, `SATS/BYTES`: a rate above it, configured or published, is lowered to it |
 | `fee_max_tx` | none | the most one transaction may pay in fee, in satoshis; a fee above it is refused, not paid |
 | `fee_min_rate` | `100/1000` | with `fee_source = arc`, the least a published rate may be |
 | `fee_policy_urls` | the arcade or ARC in `settle` | with `fee_source = arc`, the broadcasters whose published policy is read, comma separated; the highest rate is taken |
@@ -188,7 +188,7 @@ spent and mined, so its verdict is held to the chain view's spends.
 ### Fees
 
 The miner fee is the network's rate, 100 satoshis per 1000 bytes, with a
-floor of 250 satoshis a transaction. `fee_rate` and `fee_floor` change
+floor of 100 satoshis a transaction (what 1000 bytes pay). `fee_rate` and `fee_floor` change
 them. `fee_source = arc` follows the rate the broadcaster publishes
 instead, read at most every 5 minutes and held between `fee_min_rate` and
 `fee_max_rate`, so a mistaken or compromised policy endpoint cannot drain

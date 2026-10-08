@@ -522,7 +522,7 @@ office      support_qzxkvbmwtr
 headers     woc:test tip 1761988
 chain       woc:test
 settle      arcade:test answering
-fee         100/1000 satoshis/bytes, floor 250 sat (static)
+fee         100/1000 satoshis/bytes, floor 100 sat (static)
 identity    02c6...9a1e
 pool        4 output(s), 96200 sat, 0 immature
 tree        6a41...e3b0 27 of 32 left

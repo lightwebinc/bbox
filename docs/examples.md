@@ -75,7 +75,7 @@ chain       asset:https://node.example.com
 $ bbox -header-url bhs:https://headers.example.com doctor | grep headers   # header_token in the config
 $ bbox -settle arcade:https://arcade.example.com doctor | grep settle
 $ bbox -fee-source arc doctor | grep fee        # the broadcaster's published rate
-fee         100/1000 satoshis/bytes, floor 250 sat (the broadcaster's published policy)
+fee         100/1000 satoshis/bytes, floor 100 sat (the broadcaster's published policy)
 ```
 
 ## Create an office to receive in
