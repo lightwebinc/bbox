@@ -30,6 +30,7 @@ flowchart LR
 | Publisher | `send` | seals, persists, mints funding trees, publishes and retracts, over one identity's home |
 | Reader | `reader` | asks every host the `ls_bbox` questions, verifies every answer against the caller's headers, applies the recipient's checks |
 | Host module | `host/` (TypeScript) | `tm_bbox_<office>` admits carriers, receipts and sweeps; `ls_bbox` answers the lookup classes; an optional terms route sells history |
+| Sender's builders | `host/src/send.ts` (TypeScript) | the twins of `boxrec.Seal`, `SealEnvelope`, `EncodePlaintext`, the payment's BRC-29 destination and member, and the envelope carrier (bcommon's `mintCarrier`), every key operation through a BRC-100 wallet, held to `envelope-v1.json`, `transaction-v1.json` and `payment-v1.json`; for a page that sends through the user's wallet. Not part of the host module's bundle |
 | Local chain | `cmd/devchain` | a regtest stand-in node and header source for the development sandbox and tests; coinbase only on this chain |
 
 The shared building blocks (the embedded wallet and coin pool, minting,
