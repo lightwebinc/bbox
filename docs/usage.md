@@ -28,7 +28,7 @@ a host's payee settles the payments the host recorded.
 
 ## Build
 
-Go 1.27.1 or later, or Docker.
+Go 1.27.2 or later, or Docker.
 
 ```console
 $ make bbox              # bin/bbox

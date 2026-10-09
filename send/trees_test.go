@@ -22,7 +22,7 @@ import (
 
 	"github.com/lightwebinc/bbox/internal/limits"
 	"github.com/lightwebinc/bbox/internal/state"
-	"github.com/lightwebinc/bbox/internal/unicast"
+	"github.com/lightwebinc/bcommon/unicast"
 )
 
 // rig is one funded home over a local chain. Each open is the publisher

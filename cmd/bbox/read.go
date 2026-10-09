@@ -33,9 +33,9 @@ import (
 	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/limits"
 	"github.com/lightwebinc/bbox/internal/state"
-	"github.com/lightwebinc/bbox/internal/unicast"
 	"github.com/lightwebinc/bbox/reader"
 	"github.com/lightwebinc/bbox/send"
+	"github.com/lightwebinc/bcommon/unicast"
 )
 
 // view is which envelope class a reading command asks: the inbox, a box, or

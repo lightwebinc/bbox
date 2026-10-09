@@ -28,7 +28,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AuthFetch, PrivateKey, Transaction, type WalletInterface } from '@bsv/sdk'
 import { LockTime } from '@lightwebinc/bcommon'
-import { TestNetwork, serveNetwork } from './testnetwork.js'
+import { TestNetwork, serveNetwork } from '@lightwebinc/bcommon/testing'
 import { Chain, Party, PayingWallet, carrier, commitment, envelopeRecord, fundingTree, receiptRecord, sweep } from './testmint.js'
 import { beefOf, byName, txVectors } from './testutil.js'
 

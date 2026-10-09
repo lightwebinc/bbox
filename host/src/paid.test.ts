@@ -48,7 +48,7 @@ import {
 } from '@lightwebinc/bcommon/host'
 import { Ledger, bboxRoute, parsePrices, termsDocument } from './paid.js'
 import { PaymentProtocol } from './payment.js'
-import { TestNetwork } from './testnetwork.js'
+import { TestNetwork } from '@lightwebinc/bcommon/testing'
 import { Chain, Party, PayingWallet, carrier, commitment, envelopeRecord, fromNowhere, fundingTree, receiptRecord } from './testmint.js'
 import { FakeHost, MemoryStorage, quietConsole } from './testutil.js'
 

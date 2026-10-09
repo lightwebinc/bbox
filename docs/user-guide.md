@@ -33,7 +33,7 @@ history (section 9).
 ## 2. Install
 
 - **Go**: `go install github.com/lightwebinc/bbox/cmd/bbox@latest` (Go
-  1.27.1 or later).
+  1.27.2 or later).
 - **Release tarball**: a static binary for linux or darwin, amd64 or arm64,
   with `SHA256SUMS`, from the
   [releases page](https://github.com/lightwebinc/bbox/releases).

@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 
 	"github.com/lightwebinc/bbox/internal/state"
-	"github.com/lightwebinc/bbox/internal/unicast"
+	"github.com/lightwebinc/bcommon/unicast"
 )
 
 // A home is one identity's directory: its wallet (bcommon's bwallet, under

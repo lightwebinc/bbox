@@ -32,9 +32,9 @@ import (
 	"github.com/lightwebinc/bbox/internal/config"
 	"github.com/lightwebinc/bbox/internal/limits"
 	"github.com/lightwebinc/bbox/internal/state"
-	"github.com/lightwebinc/bbox/internal/unicast"
 	"github.com/lightwebinc/bbox/reader"
 	"github.com/lightwebinc/bbox/send"
+	"github.com/lightwebinc/bcommon/unicast"
 )
 
 // httpClient is the client for everything but submissions, which

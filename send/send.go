@@ -49,8 +49,8 @@ import (
 	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/limits"
 	"github.com/lightwebinc/bbox/internal/state"
-	"github.com/lightwebinc/bbox/internal/unicast"
 	"github.com/lightwebinc/bbox/reader"
+	"github.com/lightwebinc/bcommon/unicast"
 )
 
 // Params are the carrier parameters of every bbox carrier.
