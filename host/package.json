@@ -23,7 +23,7 @@
     "@lightwebinc/bcommon": "file:vendor/lightwebinc-bcommon-0.21.0.tgz"
   },
   "devDependencies": {
-    "@bsv/overlay": "2.3.1",
+    "@bsv/overlay": "2.6.4",
     "@types/node": "^24.10.1",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
