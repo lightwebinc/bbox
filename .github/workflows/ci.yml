@@ -66,3 +66,7 @@ jobs:
         run: npm test
       - name: vectors match the TypeScript codec
         run: npm run vectors-check
+      # The codec package other applications vendor: it packs, and holds the
+      # codec files only.
+      - name: the codec package packs
+        run: npm pack --dry-run

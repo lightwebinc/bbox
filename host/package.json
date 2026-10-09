@@ -1,13 +1,43 @@
 {
   "name": "@lightwebinc/bbox-host",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "private": true,
   "description": "The bbox record layer in TypeScript and the host module for an overlay host: envelope and receipt records, the BRC-169 content and its JSON subset, office and box names, lookup questions, the topic manager's transaction rules and the recipient's payment checks, held to the Go codec's vectors, and tm_bbox with ls_bbox as a module the host loads by path",
   "license": "Apache-2.0",
   "type": "module",
+  "exports": {
+    "./codec/*.js": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
   "engines": {
     "node": ">=24 <25"
   },
+  "files": [
+    "dist/admit.js",
+    "dist/admit.d.ts",
+    "dist/beef.js",
+    "dist/beef.d.ts",
+    "dist/boxrec.js",
+    "dist/boxrec.d.ts",
+    "dist/content.js",
+    "dist/content.d.ts",
+    "dist/jcs.js",
+    "dist/jcs.d.ts",
+    "dist/payment.js",
+    "dist/payment.d.ts",
+    "dist/query.js",
+    "dist/query.d.ts",
+    "dist/script.js",
+    "dist/script.d.ts",
+    "dist/send.js",
+    "dist/send.d.ts",
+    "dist/util.js",
+    "dist/util.d.ts",
+    "LICENSE",
+    "NOTICE"
+  ],
   "scripts": {
     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc",
@@ -16,16 +46,20 @@
     "pretest": "npm run build && npm run bundle",
     "test": "node --test \"dist/**/*.test.js\"",
     "vectors": "node dist/tsvectors.js",
-    "vectors-check": "node dist/tsvectors.js -check"
+    "vectors-check": "node dist/tsvectors.js -check",
+    "prepack": "npm run build -- --sourceMap false && node -e \"for (const f of ['LICENSE', 'NOTICE']) require('node:fs').copyFileSync('../' + f, f)\""
   },
   "dependencies": {
-    "@bsv/sdk": "2.7.1",
-    "@lightwebinc/bcommon": "file:vendor/lightwebinc-bcommon-0.21.0.tgz"
+    "@bsv/sdk": "2.7.1"
   },
   "devDependencies": {
     "@bsv/overlay": "2.3.1",
+    "@lightwebinc/bcommon": "file:vendor/lightwebinc-bcommon-0.22.0.tgz",
     "@types/node": "^24.10.1",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
+  },
+  "peerDependencies": {
+    "@lightwebinc/bcommon": "^0.22.0"
   }
 }

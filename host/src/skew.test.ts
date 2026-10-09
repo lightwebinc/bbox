@@ -1,7 +1,8 @@
 /**
  * One tag for both languages: the TypeScript library the codec is built on
  * is the version of the Go library go.mod requires, installed from the
- * vendored tarball of that version.
+ * vendored tarball of that version, and the codec package's peer range
+ * starts at it.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,6 +17,9 @@ test('the library package is the version of the Go library go.mod requires, from
   assert.equal(required.length, 1, `go.mod requires ${goModule} ${required.length} times`)
   const installed = (JSON.parse(read(`../node_modules/${library}/package.json`)) as { version: string }).version
   assert.equal(required[0], `v${installed}`)
-  const pkg = JSON.parse(read('../package.json')) as { dependencies: Record<string, string> }
-  assert.equal(pkg.dependencies[library], `file:vendor/lightwebinc-bcommon-${installed}.tgz`)
+  // The codec package names the library as a peer (its consumer installs it)
+  // and installs the vendored tarball for its own build and tests.
+  const pkg = JSON.parse(read('../package.json')) as { devDependencies: Record<string, string>; peerDependencies: Record<string, string> }
+  assert.equal(pkg.devDependencies[library], `file:vendor/lightwebinc-bcommon-${installed}.tgz`)
+  assert.equal(pkg.peerDependencies[library], `^${installed}`)
 })
