@@ -113,7 +113,14 @@ identity has its own.
 The images are `ghcr.io/lightwebinc/bbox`, `bbox-host` and
 `bbox-devchain`. To build them from a checkout instead of pulling them:
 `make docker-build` and `make docker-build-host REFERENCE_HOST_IMAGE=<the
-reference overlay host image>`.
+reference overlay host image>`. To run other images, set
+`BBOX_IMAGE`, `BBOX_HOST_IMAGE` or `DEVCHAIN_IMAGE` (in `.env` or the
+environment; default the published ones, tag `latest`).
+
+The hosts publish on loopback only: host-a's overlay API at
+`127.0.0.1:8081` and its terms route at `127.0.0.1:8091`, host-b's overlay
+API at `127.0.0.1:8082`. The `bbox` service reaches them inside the
+compose network as `host-a:8080`, `host-a:8090` and `host-b:8080`.
 
 ### 2. Three identities, an office, the payee key
 

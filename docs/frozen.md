@@ -21,14 +21,14 @@ that registry.
 | Key id | `envelope` | the record output of every carrier (envelopes and receipts), its field signature, and funding-tree outputs | signed |
 | Key id | `signature` | the BRC-169 envelope signature (spec section 4.4) | signed |
 | Key id | `fund` | the embedded wallet's funding key | signed |
-| Tag prefix | `bb` (`62 62`) | owned by bbox. Registered prefixes are `bf`, `gw`, `bl` and `vx` (tests); none planned is `bb` | signed |
+| Tag prefix | `bb` (`62 62`) | owned by bbox; every registered prefix is listed in bcommon's [registry](https://github.com/lightwebinc/bcommon/blob/main/docs/registry.md) | signed |
 | Tag | `bb` `0x02` | funding-tree output, its one field (the `0x02` every registered application uses for funding) | signed |
 | Record magic | `bbe` `0x01` | envelope record, version 1 (`"bb"`, `'e'`, version) | signed |
 | Record magic | `bbr` `0x01` | receipt record, version 1 (`"bb"`, `'r'`, version) | signed |
 | Topics | `tm_bbox_<name>_<suffix>` | one topic per office: a readable `<name>` of at most 31 characters and a 10-letter random `<suffix>` fixed at the office's creation (spec section 7.1); the `tm_bbox_` namespace belongs to bbox | signed |
 | Lookup service | `ls_bbox` | one per host, all offices; every question names its office | signed |
 | Host route | `<base>/ls_bbox/terms` | the host terms document (spec section 7.4); `<base>` is an origin, with no path | signed |
-| Baskets | `bbox fund`, `bbox envelope funding`, `bbox kill tombstone` | wallet baskets; never on a public host, registered so no two applications share one in a wallet | signed |
+| Basket | `bbox fund` | the wallet basket; never on a public host, registered so no two applications share one in a wallet | signed |
 
 Tag type bytes `0x01`, `0x03` to `0x64`, `0x66` to `0x71` and `0x73` to
 `0xff` under `bb`, and record letters other than `e` and `r`, are unassigned

@@ -457,7 +457,7 @@ output to the key BRC-29 derives for the host's identity key, the prefix
 and a suffix of its own, from the pool, unbroadcast, as Atomic BEEF in the
 `x-bsv-payment` header as output 0, and asks again. The host verifies the payment,
 records it, broadcasts it, and answers once the network took it (or, for a
-payment over its threshold, once it mines: until then it answers 402
+payment over its threshold, once it mines: until then it answers 202
 `ERR_PAYMENT_HELD`); its payee settles it (below). A price over `-max-sats`
 (default 1000) is not paid (exit 2). One payment buys one answer page;
 `-after <created>:<txid>` asks for the next, and `-all` for every page

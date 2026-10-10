@@ -144,6 +144,10 @@ A node of your own (`chain = asset:URL`, or `spend=asset:URL` for its
 spend view alone) removes the one trust the chain view adds. Running
 block-headers-service or arcade yourself does the same for the headers.
 
+The grammar is bcommon's: see its
+[chain views](https://github.com/lightwebinc/bcommon/blob/main/docs/configuration.md#chain-views-nodeapi-interfaces).
+The tables below are the forms bbox's config keys take.
+
 ### Header sources
 
 Every proof is checked against the headers of one source, so `header_url`
