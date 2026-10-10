@@ -54,12 +54,12 @@
   },
   "devDependencies": {
     "@bsv/overlay": "2.3.1",
-    "@lightwebinc/bcommon": "file:vendor/lightwebinc-bcommon-0.22.0.tgz",
+    "@lightwebinc/bcommon": "file:vendor/lightwebinc-bcommon-0.23.0.tgz",
     "@types/node": "^24.10.1",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
   "peerDependencies": {
-    "@lightwebinc/bcommon": "^0.22.0"
+    "@lightwebinc/bcommon": "^0.23.0"
   }
 }

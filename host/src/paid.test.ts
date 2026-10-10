@@ -524,10 +524,10 @@ test('acceptance: a small paid lookup is broadcast by the host, then answered; t
   assert.equal(r.host.count('bbox_payment_events_total', { kind: 'confirmed' }), 1)
 })
 
-test('acceptance: a payment above the threshold is broadcast and held 402 until it mines, then the same payment is answered', async () => {
+test('acceptance: a payment above the threshold is broadcast and held 202 until it mines, then the same payment is answered', async () => {
   const r = await rig('history=5,history-after=5', undefined, undefined, undefined, { thresholdSats: 4 })
   const ask = await asker(r)
-  assert.equal(await ask(), 0, 'held: 402 without BRC-105 headers, so the client pays nothing more')
+  assert.equal(await ask(), 202, 'held: 202, which reaches the caller through the SDK, and the client pays nothing more')
   const p = last(r)
   assert.equal(p.decision, 'hold')
   assert.equal(p.reason, 'above-threshold')
@@ -544,7 +544,7 @@ test('acceptance: a payment above the threshold is broadcast and held 402 until 
       return 0
     }
   }
-  assert.equal(await again(), 0, 'still held before it mines')
+  assert.equal(await again(), 202, 'still held before it mines')
   r.net.mine(p.txid)
   assert.equal(await again(), 200)
   assert.equal(last(r).decision, 'mined')
@@ -554,7 +554,7 @@ test('acceptance: a payment above the threshold is broadcast and held 402 until 
 test('acceptance: arcade answers DOUBLE_SPEND_ATTEMPTED: held, and nothing charged', async () => {
   const r = await rig('history=5,history-after=5')
   r.net.mode = 'double-spend'
-  assert.equal(await (await asker(r))(), 0)
+  assert.equal(await (await asker(r))(), 202)
   assert.equal(last(r).reason, 'double-spend-attempted')
   assert.ok(r.host.count('bbox_payments_total', { decision: 'hold', reason: 'double-spend-attempted' }) >= 1)
   assert.equal(r.gate.exposure.unmined(r.client.hex).total, 0)
@@ -570,21 +570,21 @@ test('acceptance: a refusal, an unknown spend view, a silent network and a broad
   assert.equal(await ask(), 400)
   assert.equal(r.host.count('bbox_payments_total', { decision: 'refuse', reason: 'network-refused' }), 2)
   r.net.mode = 'silent'
-  assert.equal(await ask(), 0)
+  assert.equal(await ask(), 202)
   assert.equal(last(r).reason, 'no-network-verdict')
   r.net.mode = 'down'
-  assert.equal(await ask(), 0)
+  assert.equal(await ask(), 202)
   assert.equal(last(r).reason, 'broadcast-unconfirmed')
   r.net.mode = 'accept'
   r.net.spendUnknown = true
-  assert.equal(await ask(), 0)
+  assert.equal(await ask(), 202)
   assert.equal(last(r).reason, 'spend-view-unknown')
   assert.equal(r.gate.exposure.unmined(r.client.hex).total, 0, 'every demotion released its charge')
 })
 
 test('acceptance: a host with no arcade or no node holds every payment', async () => {
   const r = await rig('history=5,history-after=5', undefined, undefined, undefined, {}, false)
-  assert.equal(await (await asker(r))(), 0)
+  assert.equal(await (await asker(r))(), 202)
   assert.equal(last(r).reason, 'no-broadcast-leg')
   assert.deepEqual(r.net.sent, [])
 })
@@ -599,7 +599,7 @@ test('acceptance: a payer whose fast payment was double-spent is flagged; its la
   assert.deepEqual(events.map((e) => [e.kind, e.payer]), [['double-spent', r.client.hex]])
   assert.ok(r.host.lines.some((l) => l.msg.includes('fast payment lost')))
   assert.equal(r.host.count('bbox_payment_events_total', { kind: 'double-spent' }), 1)
-  assert.equal(await ask(), 0)
+  assert.equal(await ask(), 202)
   assert.equal(last(r).reason, 'payer-flagged')
   const bob = new Party('bob')
   assert.equal(await (await asker(r, bob, new PayingWallet(bob.key, r.chain)))(), 200, 'another payer is still fast')
@@ -610,12 +610,12 @@ test('acceptance: fast payments are bounded per payer and in total until they mi
   const ask = await asker(r)
   assert.equal(await ask(), 200)
   assert.equal(await ask(), 200)
-  assert.equal(await ask(), 0)
+  assert.equal(await ask(), 202)
   assert.equal(last(r).reason, 'payer-limit')
   const bob = new Party('bob')
   const bobAsk = await asker(r, bob, new PayingWallet(bob.key, r.chain))
   assert.equal(await bobAsk(), 200)
-  assert.equal(await bobAsk(), 0)
+  assert.equal(await bobAsk(), 202)
   assert.equal(last(r).reason, 'total-limit')
   r.net.mine(r.receiver.payments[0]!.txid)
   await r.gate.sweep()

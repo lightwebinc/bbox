@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -25,6 +24,7 @@ import (
 	"github.com/lightwebinc/bcommon/bwallet"
 	"github.com/lightwebinc/bcommon/funding"
 	"github.com/lightwebinc/bcommon/guard"
+	"github.com/lightwebinc/bcommon/heldpay"
 	"github.com/lightwebinc/bcommon/lookup"
 	"github.com/lightwebinc/bcommon/producer"
 	"github.com/lightwebinc/bcommon/purse"
@@ -616,9 +616,6 @@ type limitWatch struct {
 	mu   sync.Mutex
 	hit  bool
 	wait time.Duration
-	// held is the host's word when it held a payment for confirmation
-	// (402 ERR_PAYMENT_HELD, which carries no BRC-105 headers).
-	held string
 }
 
 // The wait a host names is taken, within these bounds.
@@ -629,17 +626,6 @@ const (
 
 func (w *limitWatch) RoundTrip(r *http.Request) (*http.Response, error) {
 	resp, err := w.next.RoundTrip(r)
-	if err == nil && resp.StatusCode == http.StatusPaymentRequired && resp.Header.Get("x-bsv-payment-version") == "" {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		_ = resp.Body.Close()
-		resp.Body = io.NopCloser(bytes.NewReader(body))
-		var e struct{ Code, Description string }
-		if json.Unmarshal(body, &e) == nil && e.Code == "ERR_PAYMENT_HELD" {
-			w.mu.Lock()
-			w.held = e.Description
-			w.mu.Unlock()
-		}
-	}
 	if err != nil || resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("x-bsv-auth-version") != "" || strings.HasSuffix(r.URL.Path, "/.well-known/auth") {
 		return resp, err
 	}
@@ -660,13 +646,6 @@ func (w *limitWatch) taken() (time.Duration, bool) {
 	hit := w.hit
 	w.hit = false
 	return w.wait, hit
-}
-
-// heldWhy is the host's word on a payment it held, or "".
-func (w *limitWatch) heldWhy() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.held
 }
 
 // errLimited is a request refused for its session's budget twice.
@@ -809,12 +788,21 @@ func (g *global) ask(ctx context.Context, h *home, hc chaintracker.ChainTracker,
 	}()
 	once := &oncePurse{Purse: p, record: func(tx *transaction.Transaction) error { return recordPayment(h, tx) }}
 	body, _ := json.Marshal(lookup.Question{Service: boxrec.LookupService, Query: q})
-	watch := &limitWatch{next: http.DefaultTransport}
+	tap := &heldpay.Tap{}
+	watch := &limitWatch{next: tap}
 	af := clients.New(once, clients.WithoutLogging(), clients.WithHttpClient(&http.Client{Timeout: g.cfg.Timeout, Transport: watch}))
 	resp, ferr := g.askLimited(ctx, func() bool { return once.tx != nil }, watch, func() (*http.Response, error) {
 		return af.Fetch(ctx, strings.TrimRight(base, "/")+"/lookup", &clients.SimplifiedFetchRequestOptions{
 			Method: http.MethodPost, Headers: map[string]string{"content-type": "application/json"}, Body: body})
 	})
+	if once.tx != nil && heldWhy(tap) != "" {
+		// The host took the payment and holds it for confirmation: once it
+		// is mined, the same payment, sent again, buys the answer.
+		resp, ferr = g.sendHeldAgain(ctx, p, once.tx, tap, resp, ferr, func(payment string) (*http.Response, error) {
+			return af.Fetch(ctx, strings.TrimRight(base, "/")+"/lookup", &clients.SimplifiedFetchRequestOptions{
+				Method: http.MethodPost, Headers: map[string]string{"content-type": "application/json", "x-bsv-payment": payment}, Body: body})
+		})
+	}
 	var ans []byte
 	status, paid, payee := 0, "", ""
 	if ferr == nil {
@@ -844,8 +832,8 @@ func (g *global) ask(ctx context.Context, h *home, hc chaintracker.ChainTracker,
 		g.broadcastPayment(ctx, p, once.tx)
 	}
 	switch {
-	case once.tx != nil && watch.heldWhy() != "":
-		return nil, once.sats, incomplete("history at %s: the host broadcast payment %s and holds it for confirmation: %s", base, once.tx.TxID(), termsafe.Abbrev(watch.heldWhy()))
+	case once.tx != nil && heldWhy(tap) != "":
+		return nil, once.sats, incomplete("history at %s: the host broadcast payment %s and holds it for confirmation: %s", base, once.tx.TxID(), termsafe.Abbrev(heldWhy(tap)))
 	case errors.Is(ferr, errLimited) && once.tx != nil:
 		return nil, once.sats, incomplete("history at %s: the host refused the paid request for its session's budget (429); nothing is asked again, since that would take a second payment; ask again later", base)
 	case errors.Is(ferr, errLimited):

@@ -229,6 +229,14 @@ payment and did not broadcast it; until the payee settles it, bob could
 still spend those coins elsewhere. `payee settle` took it into the payee's
 wallet: checked, broadcast, mined, pooled.
 
+With no arcade on the local chain, the host cannot take a payment on the
+network's word: it holds it for confirmation (`202 ERR_PAYMENT_HELD`), and
+`bbox` says so, broadcasts the payment, waits for it to mine (seconds
+here; up to 10 minutes) and sends the same payment again, which buys the
+answer. The host sees it mine through the local chain's asset API
+(`BBOX_ASSET_URL` in compose.yaml).
+
+
 ### 7. Retract
 
 ```console

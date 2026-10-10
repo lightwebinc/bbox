@@ -70,3 +70,18 @@ jobs:
       # codec files only.
       - name: the codec package packs
         run: npm pack --dry-run
+
+  # QUICKSTART.md, run as written (scripts/quickstart-check.sh), on this
+  # repository's images and the reference overlay host: what a newcomer
+  # runs. It once stayed red unnoticed.
+  quickstart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: images
+        run: |
+          make docker-build
+          make docker-build-host REFERENCE_HOST_IMAGE=${{ vars.REFERENCE_HOST_IMAGE || 'ghcr.io/lightwebinc/overlay-blueprints:0.2.2' }}
+      - name: the quickstart, as written
+        run: make quickstart-check
