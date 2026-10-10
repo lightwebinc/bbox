@@ -1,6 +1,6 @@
 {
   "name": "@lightwebinc/bbox-host",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "private": true,
   "description": "The bbox record layer in TypeScript and the host module for an overlay host: envelope and receipt records, the BRC-169 content and its JSON subset, office and box names, lookup questions, the topic manager's transaction rules and the recipient's payment checks, held to the Go codec's vectors, and tm_bbox with ls_bbox as a module the host loads by path",
   "license": "Apache-2.0",
