@@ -142,23 +142,3 @@ bbox pins go-sdk at exactly v1.7.1 and bcommon at the version in its
 `go.mod`. Go's minimal version selection gives an importer the higher of
 its own pin and bbox's, so an importer that needs the same bytes pins the
 same versions and asserts them, as bbox's `make deps-check` does.
-
-## Importing while the repository is private
-
-While the repository is private, the public Go proxy and checksum database
-cannot see it, so the `go` command has to be told to go to the repository directly,
-and needs credentials for it:
-
-```console
-$ go env -w GOPRIVATE='github.com/lightwebinc/*'
-$ git config --global url."ssh://git@github.com/lightwebinc/".insteadOf "https://github.com/lightwebinc/"
-$ go get github.com/lightwebinc/bbox@v0.1.0
-```
-
-`GOPRIVATE` turns off the proxy and the checksum database for the matching
-paths. The `insteadOf` line makes git fetch over SSH with the key the
-machine already uses; an HTTPS credential helper or a token in `~/.netrc`
-with read access to the repository does the same. A build without
-credentials (a CI job with none, for instance) can instead resolve the
-module from a copy of its tagged archive served as a file proxy
-(`GOPROXY=file://...`), which `go.sum` still verifies against the tag.
