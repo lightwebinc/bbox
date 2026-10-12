@@ -21,6 +21,11 @@ flowchart LR
   R -->|"headers"| H["header source<br/>woc:main (default) or your own"]
   R -->|"proofs, raw transactions"| N["chain view<br/>woc:main (default) or your node"]
   R -->|"BRC-104, 402, BRC-29"| T["terms route<br/>(priced history)"]
+  %% The last node is an invisible spacer in the rightmost rank: the rendered
+  %% viewer places its zoom and pan controls over the bottom-right corner.
+  F ~~~ pad
+  pad["&nbsp;<br/>&nbsp;<br/>&nbsp;<br/>&nbsp;<br/>&nbsp;"]:::pad
+  classDef pad fill:none,stroke:none,color:transparent
 ```
 
 | Component | Where | What it does |
