@@ -218,6 +218,45 @@ func TestDropRetractsAtEveryHost(t *testing.T) {
 	}
 }
 
+// On the plane a sweep is offered directly only to a host that does not
+// answer it from the plane: a host the plane reached gets one copy, not a
+// plane copy raced by a direct one, and a host the plane missed still gets
+// it.
+func TestPlaneSweepDirectOnlyWhereMissing(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.identity("alice")
+	bob := h.identity("bob")
+	h.newOffice("bob")
+	first := h.send("alice", bob, "first")
+	second := h.send("alice", bob, "second")
+
+	a0, b0 := h.a.Submits, h.b.Submits
+	r := h.must("alice", "", "drop", first)
+	if !strings.Contains(r.stdout, "retracted 1 funding output(s)") || strings.Contains(r.stderr, "offered directly") {
+		t.Fatalf("drop:\n%s\n%s", r.stdout, r.stderr)
+	}
+	if da, db := h.a.Submits-a0, h.b.Submits-b0; da != 1 || db != 1 {
+		t.Fatalf("submissions of the sweep: host a %d, host b %d; want one each, from the plane", da, db)
+	}
+
+	h.plane.Lost = func(host int, _ []byte) bool { return host == 1 }
+	a0, b0 = h.a.Submits, h.b.Submits
+	r = h.must("alice", "", "drop", second)
+	h.plane.Lost = nil
+	if !strings.Contains(r.stderr, "host "+h.bS.URL+" lacked it after the plane's delivery; offered directly and confirmed") {
+		t.Fatalf("drop with the plane losing host b's copy:\n%s\n%s", r.stdout, r.stderr)
+	}
+	if da, db := h.a.Submits-a0, h.b.Submits-b0; da != 1 || db != 1 {
+		t.Fatalf("submissions of the sweep: host a %d, host b %d; want one each (b's directly)", da, db)
+	}
+	for _, host := range []*testchain.Host{h.a, h.b} {
+		if host.Status(first) != "retracted" || host.Status(second) != "retracted" {
+			t.Fatalf("statuses %s %s", host.Status(first), host.Status(second))
+		}
+	}
+}
+
 func TestUnicastQuorumAndResume(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

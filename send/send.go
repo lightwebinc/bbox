@@ -89,8 +89,10 @@ type Options struct {
 // Legs are the endpoints a publisher talks to. Objects go to exactly one of
 // Facade (mode plane: one submit, which the plane delivers to every
 // subscribed host) and Hosts (mode unicast: one submit to each host). In
-// mode plane, Direct are the other hosts a sweep is also submitted to, since
-// a host off the plane learns of a sweep only by receiving it. Reader
+// mode plane, Direct are the other hosts a sweep must also reach, since a
+// host off the plane learns of a sweep only by receiving it: one Reader
+// asks is offered it directly only when it does not answer it from the
+// plane, and one Reader does not ask is sent it at once. Reader
 // confirms, by lookup, a host that admitted nothing, and on the plane that
 // the hosts named hold what the facade took. Headers are the publisher's
 // own block headers: the chain tip, and a kept proof a reorganization left
@@ -754,8 +756,14 @@ func (e *Engine) publish(ctx context.Context, p state.Pending) error {
 		if err := e.submitFacade(ctx, what, topic, beef); err != nil {
 			return err
 		}
-		if p.Kind == state.KindSweep && e.Legs.Direct != nil {
-			o := e.Legs.Direct.Send(ctx, what, topic, beef, len(e.Legs.Direct.Hosts), confirm)
+		// A sweep reaches every host named, off the plane too. A host that
+		// can be asked is offered it directly only when it does not answer
+		// it from the plane (confirmOnPlane below): a direct copy sent at
+		// once races the plane's to the same host. A host that cannot be
+		// asked is sent it directly here.
+		rd := e.Legs.Reader
+		if direct := e.unasked(p, confirm); direct != nil {
+			o := direct.Send(ctx, what, topic, beef, len(direct.Hosts), confirm)
 			if err := o.Err(); err != nil {
 				return fmt.Errorf("%s: a sweep reaches every host named, off the plane too: %w; it is persisted and the next command publishes it", what, err)
 			}
@@ -766,7 +774,6 @@ func (e *Engine) publish(ctx context.Context, p state.Pending) error {
 		// only once a lookup at the hosts named answers it: a sweep at
 		// every one, a carrier at the quorum. Until then it stays in the
 		// outbox. A publisher that names no host has nothing to ask.
-		rd := e.Legs.Reader
 		if rd == nil || confirm == nil {
 			if !e.unconfirmed {
 				e.unconfirmed = true
@@ -784,6 +791,31 @@ func (e *Engine) publish(ctx context.Context, p state.Pending) error {
 		}
 	}
 	return nil
+}
+
+// unasked are the hosts of Legs.Direct a sweep is submitted to directly at
+// once, in mode plane: those no lookup will ask whether the plane delivered
+// it (every one, when there is no reader or nothing to ask). It is nil for
+// anything but a sweep, and when every direct host is asked.
+func (e *Engine) unasked(p state.Pending, confirm unicast.Confirm) *unicast.Set {
+	d := e.Legs.Direct
+	if p.Kind != state.KindSweep || d == nil || len(d.Hosts) == 0 {
+		return nil
+	}
+	rd := e.Legs.Reader
+	if rd == nil || confirm == nil {
+		return d
+	}
+	var left []string
+	for _, h := range d.Hosts {
+		if !slices.ContainsFunc(rd.Hosts, func(r string) bool { return strings.TrimRight(r, "/") == strings.TrimRight(h, "/") }) {
+			left = append(left, h)
+		}
+	}
+	if len(left) == 0 {
+		return nil
+	}
+	return &unicast.Set{Hosts: left, Need: len(left), Retries: d.Retries, HTTP: d.HTTP, Note: d.Note, Verbose: d.Verbose}
 }
 
 // confirmOnPlane confirms an object at every host the publisher names,

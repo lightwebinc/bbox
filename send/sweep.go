@@ -28,8 +28,9 @@ import (
 // one of those outputs is a double spend, and every conforming host stops
 // answering it. A sweep is persisted before it is settled, waited for until
 // it mines, and then published once to every office it retracts carriers
-// in: in mode plane to the facade and directly to every other host named,
-// in mode unicast to every host named. Only honest hosts drop what a sweep
+// in: in mode plane to the facade and directly to each other host named
+// that does not answer it from the plane, in mode unicast to every host
+// named. Only honest hosts drop what a sweep
 // retracts: it is not erasure.
 
 // ErrSweepInFlight is a new sweep asked for while one is still in flight.

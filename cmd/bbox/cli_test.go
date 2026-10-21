@@ -45,6 +45,7 @@ type harness struct {
 	chainS *httptest.Server
 	aS, bS *httptest.Server
 	planeS *httptest.Server
+	plane  *testchain.Plane
 	paid   *testchain.Paid
 	paidS  *httptest.Server
 	env    map[string]string
@@ -103,7 +104,8 @@ func newHarness(t *testing.T) *harness {
 	h.a, h.b = testchain.NewHost(h.chain), testchain.NewHost(h.chain)
 	h.chainS = httptest.NewServer(http.HandlerFunc(h.serveChain))
 	h.aS, h.bS = httptest.NewServer(h.a), httptest.NewServer(h.b)
-	h.planeS = httptest.NewServer(&testchain.Plane{Hosts: []http.Handler{h.a, h.b}})
+	h.plane = &testchain.Plane{Hosts: []http.Handler{h.a, h.b}}
+	h.planeS = httptest.NewServer(h.plane)
 	for _, s := range []*httptest.Server{h.chainS, h.aS, h.bS, h.planeS} {
 		t.Cleanup(s.Close)
 	}

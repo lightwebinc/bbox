@@ -205,10 +205,13 @@ events since this process started and starts again at 0 on a restart; a
 gauge is what the index holds now, restored on start and lowered by
 retention. So `bbox_admitted_total{kind="sweep"}` and `bbox_sweeps` agree
 only on a host that has not restarted or dropped anything since the sweeps
-arrived. In mode plane a client sends a sweep to the facade and then
-directly to every host it names, so a host on the plane may be offered the
-same sweep twice within a second; when both submissions pass the engine's
-duplicate check before either is applied, the manager sees it twice. The
+arrived. In mode plane a client sends a sweep to the facade, and directly
+to a host it names only when that host does not answer it from the plane
+(earlier clients sent every host a direct copy at once), so a host may
+still be offered the same sweep twice: by a late plane copy, by an older
+client, or by anyone filling it across. When both submissions pass the
+engine's duplicate check before either is applied, the manager sees it
+twice. The
 second is counted in `bbox_admitted_repeats_total`, not again in
 `bbox_admitted_total`. A manager remembers the last 4096 txids it counted.
 

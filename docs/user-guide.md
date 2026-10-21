@@ -301,11 +301,12 @@ envelope a host has not taken) does not stop a drop.
 | Other hosts receive it | from the plane, which repairs loss | only from you, or from whoever copies it across (`list -fill`) |
 | A host that was down | receives what it missed from the plane | misses it until someone submits it again |
 | An envelope or a receipt counts as published | once `quorum` of the hosts named answer it by lookup (name them in `hosts`) | once `quorum` hosts took it |
-| Sweeps | to the facade and directly to every other host named; all must answer it | to every host named; all must take it |
+| Sweeps | to the facade, and directly to each other host named that does not answer it from the plane; all must answer it | to every host named; all must take it |
 | Settings | `facade`, and `hosts` for reading | `mode = unicast`, `hosts`, `quorum` |
 
 On the plane a host off it learns of a sweep only because the client also
-sends it directly to every host named. In unicast an object counts once
+sends it directly to each host named that does not answer it from the plane
+within a few seconds. In unicast an object counts once
 `quorum` hosts take it; a host that answers it admitted nothing is checked
 by a lookup, since a duplicate and a refusal look the same.
 

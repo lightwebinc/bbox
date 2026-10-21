@@ -110,7 +110,7 @@ on a regtest chain you run, for development and tests).
 | `header_url` | `woc:<network>` on main and test | the header source every proof is checked against: `woc:main`, `woc:test`, `bhs:URL`, `arcade:URL`, `chaintracks:URL`, or an overlay bridge's base URL (native `/v1/root/<height>` and `/v1/tip`) |
 | `history_host` | none | the base URL of `ls_bbox` on the host `history` asks and `terms` reads: the host's terms route (spec section 7.4). An origin, with no path: BRC-104 authenticates at the origin's `/.well-known/auth`, and the route answers `/lookup` and `/ls_bbox/terms` at its root |
 | `home` | `~/.bbox` | the identity's home |
-| `hosts` | none | the overlay hosts, comma separated, at most 16: every host a reader asks and compares; in mode `unicast` every host a publisher submits to; in mode `plane` the hosts other than `facade` a sweep is also sent to directly |
+| `hosts` | none | the overlay hosts, comma separated, at most 16: every host a reader asks and compares; in mode `unicast` every host a publisher submits to; in mode `plane` the hosts other than `facade` a sweep must also reach, sent it directly when one does not answer it from the plane |
 | `mode` | `plane` | `plane` or `unicast`: how a publisher's objects reach the hosts (spec section 9) |
 | `network` | `main` | `main`, `test` or `regtest`: the fund address prefix and the header source's proof-of-work floor |
 | `object_bound` | `1048576` | the plane's object bound in bytes, at most 8388608; a carrier whose BEEF is larger is not published |

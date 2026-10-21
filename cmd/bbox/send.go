@@ -336,8 +336,9 @@ const dropHelp = `usage: bbox drop <txid>...
 
 Retract envelopes this identity sent, by sweeping the funding outputs their
 carriers spent: one mined transaction per funding tree. Once it mines it is
-published to every office it retracts in (on the plane to the facade and
-directly to every other host named; in mode unicast to every host), and
+published to every office it retracts in (on the plane to the facade, and
+directly to each other host named that does not answer it from the plane;
+in mode unicast to every host), and
 every conforming host stops answering those envelopes, read or not. -tree
 sweeps every output of a funding tree, used or not, which retracts every
 carrier on it, receipts included, and takes its unused value into the

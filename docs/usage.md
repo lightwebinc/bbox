@@ -396,8 +396,9 @@ retraction reaches honest hosts only: it is not erasure, and a copy anyone kept 
 `drop` sweeps the funding outputs of the named envelopes, one mined
 transaction per funding tree (bcommon `carrier.Sweep`: output 0 a
 funding-shaped tombstone, so hosts admit it), waits for it to mine, and
-publishes it to each office it retracts in: on the plane to the facade and
-directly to every other host in `hosts`, in mode unicast to every host. A
+publishes it to each office it retracts in: on the plane to the facade, and
+directly to each other host in `hosts` that does not answer it from the
+plane; in mode unicast to every host. A
 host that holds the sweep answers none of those envelopes again, read or
 not. `drop -tree TXID -yes` sweeps every output of a funding tree, used or
 not, which retracts every carrier on it, receipts included.

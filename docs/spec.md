@@ -878,9 +878,11 @@ hosts and the readers are the same in both.
 first in the object's topic list; the plane delivers it to every subscribed
 host and repairs loss. Nothing in bbox disables, bypasses or asks for an
 exception from repair, for any class, office or configuration; lateness is
-the reader's to handle. A sweep is also submitted directly to every host the
-publisher names, because a host off the plane learns of a sweep only by
-receiving it.
+the reader's to handle. A sweep must also reach every host the publisher
+names, because a host off the plane learns of a sweep only by receiving it:
+a host that does not answer the sweep by lookup once the plane had time to
+deliver it is sent it directly, and a host the publisher cannot ask is sent
+it directly at once.
 
 **Unicast.** The publisher submits the same bytes to each host it names (at
 most 16), retries each on its own, and counts the object published once a
