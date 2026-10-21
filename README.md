@@ -19,6 +19,8 @@ verifies every envelope against block headers it checks itself, and
 acknowledges with a signed receipt that every host applies. A payment can
 travel inside an envelope, unbroadcast, for the recipient to internalize.
 
+> **Maintenance.** `host/src` is in maintenance: bug fixes only. A Go implementation is planned.
+
 ## Install
 
 ```console
