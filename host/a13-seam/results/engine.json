@@ -1,0 +1,119 @@
+{
+ "backend": "engine",
+ "trials": 50,
+ "run": "93e8e1",
+ "started": "2026-10-01T04:00:24.466Z",
+ "engine": "@bsv/overlay 2.3.1",
+ "scenarios": {
+  "sequential": {
+   "admitted": 50,
+   "seen.p1=admit": 50,
+   "seen.p2=admit": 50,
+   "seen.p3=admit": 50,
+   "seen.p4=admit": 50
+  },
+  "concurrentPair": {
+   "refused": 50,
+   "seen.p1=absent": 50,
+   "seen.p2=absent": 50,
+   "seen.p3=absent": 50,
+   "seen.p4=absent": 50
+  },
+  "concurrentBurst": {
+   "seen.p1=absent": 128,
+   "seen.p2=absent": 84,
+   "seen.p3=absent": 83,
+   "seen.p4=absent": 83,
+   "seen.p2=admit": 316,
+   "seen.p3=admit": 317,
+   "seen.p4=admit": 317,
+   "seen.paths-disagree": 46,
+   "seen.p1=admit": 272,
+   "envelopes": 400,
+   "admitted": 272,
+   "trials-with-4-of-8": 4,
+   "trials-with-7-of-8": 5,
+   "trials-with-5-of-8": 11,
+   "trials-with-6-of-8": 25,
+   "trials-with-2-of-8": 2,
+   "trials-with-1-of-8": 1,
+   "trials-with-8-of-8": 1,
+   "trials-with-3-of-8": 1
+  },
+  "sameTx": {
+   "policy-admitted": 50,
+   "envelope-refused": 50,
+   "seen.p1=absent": 50,
+   "seen.p2=absent": 50,
+   "seen.p3=absent": 50,
+   "seen.p4=absent": 50
+  },
+  "outOfOrder": {
+   "refuse=throw": {
+    "first-refused": 50,
+    "retry-admitted": 50,
+    "manager-calls-2": 50,
+    "held-after-retry": 50
+   },
+   "refuse=empty": {
+    "first-refused": 50,
+    "retry-refused": 50,
+    "manager-calls-1": 50,
+    "not-held-after-retry": 50
+   }
+  },
+  "restore": {
+   "restarts": 5,
+   "admitted": 50,
+   "seen.p1=admit": 50,
+   "seen.p2=admit": 50,
+   "seen.p3=admit": 50,
+   "seen.p4=admit": 50
+  },
+  "restoreNoHook": {
+   "refused": 50,
+   "seen.p1=unreachable": 50,
+   "seen.p2=unreachable": 50,
+   "seen.p3=absent": 50,
+   "seen.p4=absent": 50,
+   "seen.paths-disagree": 50
+  },
+  "spent": {
+   "A drops spent": {
+    "after-spend-refused": 50,
+    "after-spend-seen.p1=absent": 50,
+    "after-spend-seen.p2=scope": 50,
+    "after-spend-seen.p3=scope": 50,
+    "after-spend-seen.p4=scope": 50,
+    "after-spend-seen.paths-disagree": 50,
+    "race-refused": 39,
+    "race-admitted": 11
+   },
+   "A retains spent": {
+    "after-spend-refused": 50,
+    "after-spend-seen.p1=spent": 50,
+    "after-spend-seen.p2=scope": 50,
+    "after-spend-seen.p3=scope": 50,
+    "after-spend-seen.p4=scope": 50,
+    "after-spend-seen.paths-disagree": 50,
+    "race-refused": 32,
+    "race-admitted": 18
+   }
+  },
+  "evict": {
+   "before-evict-admitted": 50,
+   "after-evict-refused": 50,
+   "after-evict-seen.p1=absent": 50,
+   "after-evict-seen.p2=absent": 50,
+   "after-evict-seen.p3=absent": 50,
+   "after-evict-seen.p4=absent": 50,
+   "earlier-envelope-still-held": 50,
+   "policy-resubmit-readmitted": 50
+  },
+  "gasp": {
+   "unreachable": "GASP is measured on the reference host backend"
+  }
+ },
+ "finished": "2026-10-01T04:00:48.683Z",
+ "work": "/tmp/a13-93e8e1"
+}

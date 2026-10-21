@@ -14,3 +14,5 @@ deploy/quickstart/office.txt
 scripts/*.env
 **/*.test
 **/*.out
+# The admission-seam harness is a measurement, never part of an image.
+host/a13-seam

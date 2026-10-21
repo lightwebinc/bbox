@@ -1,0 +1,135 @@
+{
+ "backend": "refhost",
+ "trials": 20,
+ "run": "fb999a",
+ "started": "2026-10-01T04:00:49.493Z",
+ "engine": "@bsv/overlay 2.3.1",
+ "scenarios": {
+  "sequential": {
+   "admitted": 20,
+   "seen.p1=admit": 20,
+   "seen.p2=admit": 20,
+   "seen.p3=admit": 20,
+   "seen.p4=admit": 20
+  },
+  "concurrentPair": {
+   "refused": 20,
+   "seen.p1=absent": 20,
+   "seen.p2=absent": 20,
+   "seen.p3=absent": 20,
+   "seen.p4=absent": 11,
+   "seen.p4=admit": 9,
+   "seen.paths-disagree": 9
+  },
+  "concurrentBurst": {
+   "seen.p1=absent": 60,
+   "seen.p2=absent": 39,
+   "seen.p3=absent": 38,
+   "seen.p4=absent": 26,
+   "seen.p4=admit": 134,
+   "seen.paths-disagree": 34,
+   "seen.p2=admit": 121,
+   "seen.p3=admit": 122,
+   "seen.p1=admit": 100,
+   "envelopes": 160,
+   "admitted": 100,
+   "trials-with-4-of-8": 3,
+   "trials-with-2-of-8": 3,
+   "trials-with-6-of-8": 6,
+   "trials-with-7-of-8": 4,
+   "trials-with-5-of-8": 3,
+   "trials-with-3-of-8": 1
+  },
+  "sameTx": {
+   "policy-admitted": 20,
+   "envelope-refused": 20,
+   "seen.p1=absent": 20,
+   "seen.p2=absent": 20,
+   "seen.p3=absent": 20,
+   "seen.p4=absent": 20
+  },
+  "outOfOrder": {
+   "refuse=throw": {
+    "first-refused": 20,
+    "retry-admitted": 20,
+    "manager-calls-2": 20,
+    "held-after-retry": 20
+   },
+   "refuse=empty": {
+    "first-refused": 20,
+    "retry-refused": 20,
+    "manager-calls-1": 20,
+    "not-held-after-retry": 20
+   }
+  },
+  "restore": {
+   "restarts": 5,
+   "admitted": 20,
+   "seen.p1=admit": 20,
+   "seen.p2=admit": 20,
+   "seen.p3=admit": 20,
+   "seen.p4=admit": 20
+  },
+  "restoreNoHook": {
+   "unreachable": "the reference host always calls restore()"
+  },
+  "spent": {
+   "A drops spent": {
+    "after-spend-refused": 20,
+    "after-spend-seen.p1=absent": 20,
+    "after-spend-seen.p2=scope": 20,
+    "after-spend-seen.p3=scope": 20,
+    "after-spend-seen.p4=scope": 20,
+    "after-spend-seen.paths-disagree": 20,
+    "race-refused": 19,
+    "race-admitted": 1
+   },
+   "A retains spent": {
+    "after-spend-refused": 20,
+    "after-spend-seen.p1=spent": 20,
+    "after-spend-seen.p2=scope": 20,
+    "after-spend-seen.p3=scope": 20,
+    "after-spend-seen.p4=scope": 20,
+    "after-spend-seen.paths-disagree": 20,
+    "race-admitted": 2,
+    "race-refused": 18
+   }
+  },
+  "evict": {
+   "unreachable": "the reference host has no eviction route"
+  },
+  "gasp": {
+   "order A,B (x3 fresh peers)": {
+    "pass1-sync-ok": 3,
+    "pass1-live-envelopes-held": 60,
+    "pass1-spent-policy-envelopes-held": 0,
+    "pass2-sync-ok": 3,
+    "pass2-live-envelopes-held": 60,
+    "pass2-spent-policy-envelopes-held": 0,
+    "source-envelopes-live": 60,
+    "source-envelopes-spent-policy": 60,
+    "dry-seen.p1=admit": 15,
+    "dry-seen.p2=admit": 15,
+    "dry-seen.p3=admit": 15,
+    "dry-seen.p4=admit": 15
+   },
+   "order B,A (x3 fresh peers)": {
+    "pass1-sync-ok": 3,
+    "pass1-live-envelopes-held": 0,
+    "pass1-spent-policy-envelopes-held": 0,
+    "pass2-sync-ok": 3,
+    "pass2-live-envelopes-held": 0,
+    "pass2-spent-policy-envelopes-held": 0,
+    "source-envelopes-live": 60,
+    "source-envelopes-spent-policy": 60,
+    "dry-seen.p1=absent": 15,
+    "dry-seen.p2=absent": 15,
+    "dry-seen.p3=absent": 15,
+    "dry-seen.p4=absent": 15
+   }
+  }
+ },
+ "refhost": "0.2.2",
+ "finished": "2026-10-01T04:01:55.456Z",
+ "work": "/tmp/a13-fb999a"
+}
