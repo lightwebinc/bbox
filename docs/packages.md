@@ -3,14 +3,16 @@
 bbox is a command and a host module. Three of its Go packages are also
 public, so that another application can send and read bbox envelopes by
 bbox's own code instead of a copy of it: the envelope and its plaintext, the
-sending, and the listing. Everything else stays under `internal/` and cannot
-be imported.
+sending, and the listing. A fourth, `module`, is the host module in Go, for
+a Go overlay host to mount ([host.md](host.md), "The Go module"). Everything
+else stays under `internal/` and cannot be imported.
 
 | Package | What it is |
 | --- | --- |
 | `github.com/lightwebinc/bbox/boxrec` | The byte-level contract ([spec.md](spec.md)): the envelope and receipt records, the BRC-169 content, sealing and opening it, the plaintext and its rules, the payment rules, the name grammars and the bounds. No network. |
 | `github.com/lightwebinc/bbox/reader` | A client that asks overlay hosts the `ls_bbox` questions, verifies every answer against the caller's own headers, and applies the recipient's checks to what it decrypts. |
 | `github.com/lightwebinc/bbox/send` | A publisher over one identity's home: it seals envelopes, pays inside them, acknowledges them with receipts and retracts them, persisting each before it is published. |
+| `github.com/lightwebinc/bbox/module` | The host module in Go, on bcommon's engine-neutral module contract: `tm_bbox_` managers, `ls_bbox`, the terms route. A host calls `New` with its environment and runs `Mounted.Start`. |
 
 Each package has an example (`go doc -all`, or the `example_test.go`
 beside it).
@@ -110,6 +112,18 @@ published; a run that stops part way publishes the same bytes at the next
   only from an envelope whose `Expires` is at least `PaymentMinLife` after
   its `Created` (spec section 10); `Engine.Envelope` does not check it, so
   the caller sets it.
+
+**`module`**
+
+- `New` (the factory: the configuration read through a `getenv`, checked
+  against `OVERLAY_TOPICS`), `Name`, `Build` (the version the host logs).
+- `Mounted`: `Module` (bcommon's `module.Module`: the managers and
+  `ls_bbox`), `Mounted.Start` (the terms route, the payment watch and
+  retention, until its context ends) and `Mounted.Close`.
+- `ParseConfig`, `Config`, `Mount` (a configuration built in code).
+
+A host mounts it as it mounts any module on bcommon's contract, and hands
+the managers the submission's bytes (`module.WithSubmission`).
 
 ## What the packages do not do
 

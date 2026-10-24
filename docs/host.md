@@ -180,6 +180,45 @@ office that admitted it and named there in the outpoint rows, so each
 office answers it, a restart reads it back in each, and dropping it from
 one topic leaves it answering in the others.
 
+## The Go module
+
+The same module exists in Go, `module/` in this repository, written to
+bcommon's engine-neutral contract (`github.com/lightwebinc/bcommon/module`)
+for a Go overlay host that carries the adapter: `tm_bbox_<name>_<suffix>`
+for each office `BBOX_OFFICES` names and `ls_bbox` for all of them, with the
+same admissions and refusals (the rules are `boxrec.Admit`, and every
+refusal is raised), the same statuses, evidence cap, retention, restore and
+question classes, the same terms route (bcommon's Go `termsroute`: the same
+paths, status codes, budgets, metric names and ledger lines as the route
+above) and the same metrics. It reads the same variables and refuses the
+same mistakes, and has one of its own:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BBOX_JOURNAL_SYNC_MS` | 100 | the outpoint journal's group commit window: lines are written to `outpoints.jsonl` at once and fsynced together this often, off the admission's path. 0 fsyncs each line before the admission completes, as the module above does. At most 60000 |
+
+The state directory is the same: `outpoints.jsonl` holds the same lines,
+byte for byte, so a host can move between the two modules with its
+journal, and `payments.jsonl` has the same layout, which `bbox payee
+settle` reads as before. With a window, a process that dies loses no line
+(each is written before the admission completes) and a power loss loses at
+most the last window's, as a store that syncs its write-ahead log on a
+timer does.
+
+On the Go host the topic manager reads the submission's bytes exactly as
+they arrived (`module.WithSubmission`), as the module above reads the
+submitted BEEF: the beef rule counts what the wire declares. `ls_bbox`
+answers the host's `/lookup` with outputs the host hydrates from its
+storage, and the terms route hydrates its answers the same way. A dropped
+carrier's output is deleted through `DeleteOutput` on the storage a restore
+is handed; the host keeps its record that the transaction was applied. The
+host logs `bbox module mounted` with the topics, the terms route, the
+priced classes, the budgets, the payment acceptance, the journal's window
+and the build. Its tests drive it with the transaction, refusal and query
+vectors and this module's own cases, through a stand-in for an engine's
+admission path and a restart, and the terms route over HTTP with go-sdk's
+BRC-104 client paying its 402.
+
 ## Metrics
 
 | Name | Labels | Meaning |
@@ -199,6 +238,8 @@ one topic leaves it answering in the others.
 | `bbox_handshakes_total` | `result` | BRC-104 handshakes at the terms route: `accepted`, `failed`, `limited_address`, `limited_global` (over the budget, answered 429) |
 | `bbox_offices`, `bbox_envelopes`, `bbox_receipts`, `bbox_sweeps`, `bbox_outpoint_rows` | | gauges of what the index holds |
 | `bbox_carrier_lines` | | carriers ever admitted, each a journal line held in memory for the host's life |
+| `bbox_journal_lines_total`, `bbox_journal_wait_seconds_total` | | the Go module: journal lines written, and the time admissions spent writing them |
+| `bbox_journal_syncs_total`, `bbox_journal_sync_seconds_total` | `result` (the first) | the Go module: the journal's timed fsyncs (`ok`, `error`), and their time |
 
 Counters and gauges count different things. A `_total` counter counts
 events since this process started and starts again at 0 on a restart; a
@@ -222,11 +263,12 @@ and never reaches `bbox_refused_total`.
 
 ## Checking a build
 
-`make verify` runs the module's tests: every golden transaction through the
-topic manager and through the real overlay engine, every refusal record
-inside a real carrier, every question class, the terms route over HTTP with
-the SDK's own BRC-104 client paying its 402, and restore from the engine's
-storage in any order. `make e2e REFERENCE_HOST=<dir>` runs the bundle on a
+`make verify` runs both modules' tests: every golden transaction through the
+topic manager and through the real overlay engine (the Go module: through a
+stand-in for an engine's admission path), every refusal record inside a real
+carrier, every question class, the terms route over HTTP with the SDK's own
+BRC-104 client paying its 402, and restore from the engine's storage in any
+order. `make e2e REFERENCE_HOST=<dir>` runs the bundle on a
 local reference host with a throwaway MySQL in Docker, through submit,
 lookup, a receipt, a sweep, a paid question, a restart and the restored
 index. `make e2e-client REFERENCE_HOST=<dir>` runs the `bbox` command
