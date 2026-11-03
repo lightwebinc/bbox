@@ -5,7 +5,7 @@
   "description": "Gap A13: whether a topic manager can read another topic's outputs stably at admission. A measurement harness, not part of make verify.",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=24 <25" },
+  "engines": { "node": ">=24 <27" },
   "dependencies": {
     "@bsv/overlay": "2.3.1",
     "@bsv/sdk": "2.7.1",
