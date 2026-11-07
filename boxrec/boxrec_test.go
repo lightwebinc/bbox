@@ -137,7 +137,7 @@ func TestExtraCannotShadow(t *testing.T) {
 	}
 }
 
-// TestClassifier recognises every definite-length map head.
+// TestClassifier recognizes every definite-length map head.
 func TestClassifier(t *testing.T) {
 	tail := append([]byte{0x00, 0x44}, MagicEnvelope...)
 	for _, head := range [][]byte{{0xa8}, {0xb8, 30}, {0xb9, 0, 30}, {0xba, 0, 0, 0, 30}, {0xbb, 0, 0, 0, 0, 0, 0, 0, 30}} {

@@ -30,7 +30,7 @@ jobs:
       - name: dependency set
         run: make deps-check
       # LICENSE-THIRD-PARTY is generated from what the binaries link; a new
-      # dependency without its licence in the file fails here.
+      # dependency without its license in the file fails here.
       - name: licences
         run: make licences
       # Includes the Go side of the cross-language check: the tests decode,

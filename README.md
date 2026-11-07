@@ -19,7 +19,7 @@ verifies every envelope against block headers it checks itself, and
 acknowledges with a signed receipt that every host applies. A payment can
 travel inside an envelope, unbroadcast, for the recipient to internalize.
 
-> **Maintenance.** `host/src` is in maintenance: bug fixes only. A Go implementation is planned.
+> **Maintenance.** The TypeScript host module under `host/src` is in maintenance: bug fixes only. New behavior goes to its Go twin under `module/`, for Go overlay hosts ([docs/host.md](docs/host.md#the-go-module)). The `bbox-host` image runs the TypeScript module.
 
 ## Install
 
