@@ -26,6 +26,8 @@ jobs:
             goarch: arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The TypeScript codec package other applications vendor is the tag's:
       # its version must be the tag's, or a consumer's version check fails.
       - name: the codec package's version is the tag's
@@ -34,6 +36,7 @@ jobs:
           [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "host/package.json is $v, the tag is $GITHUB_REF_NAME"; exit 1; }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          cache: false
           # The Dockerfile builder's toolchain; it may lead go.mod's go line.
           go-version: "1.27.3"
 
@@ -74,6 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -83,8 +87,8 @@ jobs:
         run: |
           set -eux
           cd dist
-          cat *.sha256 | sort -k2 > SHA256SUMS
-          rm -f *.tar.gz.sha256
+          cat ./*.sha256 | sort -k2 > SHA256SUMS
+          rm -f ./*.tar.gz.sha256
           ls -l
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
