@@ -536,14 +536,19 @@ func TestRefusedSweepFailsAndFreesTheNextDrop(t *testing.T) {
 			gone := h.send("alice", bob, "take back")
 			tree := h.sentTree("alice", gone)
 			other := strings.Repeat("ab", 32)
-			// As the sweep is sent, another transaction takes its fee coin.
+			// As the first sweep is sent, another transaction takes its fee
+			// coin: the sweep's last input, which may be the tree's own
+			// change (the pool pays with the smallest coin that fits).
+			var once sync.Once
 			h.mu.Lock()
 			h.onSend = func(tx *transaction.Transaction) {
-				for _, in := range tx.Inputs {
-					if in.SourceTXID.String() != tree {
-						h.chain.SpendElsewhere(in.SourceTXID.String(), in.SourceTxOutIndex, other)
-					}
+				if len(tx.Inputs) < 2 || tx.Inputs[0].SourceTXID.String() != tree {
+					return
 				}
+				once.Do(func() {
+					in := tx.Inputs[len(tx.Inputs)-1]
+					h.chain.SpendElsewhere(in.SourceTXID.String(), in.SourceTxOutIndex, other)
+				})
 			}
 			h.mu.Unlock()
 			r := h.must("alice", "", "drop", gone)
