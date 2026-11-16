@@ -28,13 +28,13 @@ import (
 	"time"
 
 	"github.com/bsv-blockchain/go-sdk/chainhash"
-	"github.com/bsv-blockchain/go-sdk/spv"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/transaction/chaintracker"
 
 	"github.com/lightwebinc/bcommon/guard"
 	"github.com/lightwebinc/bcommon/hostset"
 	"github.com/lightwebinc/bcommon/lookup"
+	"github.com/lightwebinc/bcommon/verify"
 
 	"github.com/lightwebinc/bbox/boxrec"
 	"github.com/lightwebinc/bbox/internal/limits"
@@ -147,8 +147,10 @@ func Verify(ctx context.Context, beef []byte, office string, want boxrec.TxKind,
 		return nil, fmt.Errorf("reader: the answer is a %s, not a %s", a.Kind, want)
 	}
 	if a.Kind == boxrec.TxEnvelope || a.Kind == boxrec.TxReceipt {
-		ok, err := spv.Verify(ctx, tx, headers, nil)
-		if err != nil || !ok {
+		// A carrier is not final by design, so this is the overlay plane's
+		// SPV (bcommon verify.Check), not go-sdk's spv.Verify, which from
+		// v1.7.2 refuses every transaction that is not final.
+		if v, err := verify.Check(ctx, tx, headers); v != verify.Passed {
 			return nil, fmt.Errorf("reader: SPV of the carrier through its funding parent: %v", err)
 		}
 	}

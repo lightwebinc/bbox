@@ -500,14 +500,19 @@ type txCase struct {
 	beef             []byte // the BEEF as submitted; the Atomic BEEF of tx when nil
 	reason           string // "" admits
 	held             []int  // overrides the computed previous coins when not nil
+	// scriptsRefused is a case the script interpreter itself refuses, so
+	// the engine's SPV refuses it before the topic manager sees it.
+	scriptsRefused bool
 }
 
 // scriptsVerify runs the interpreter over tx's own inputs, each against the
-// output it spends.
+// output it spends. It checks scripts, amounts and shape only, with no
+// finality rule: a carrier is not final by design, and go-sdk's spv.Verify
+// refuses one from v1.7.2.
 func scriptsVerify(ctx context.Context, tx *transaction.Transaction) bool {
 	cp := tx.ShallowClone()
 	cp.MerklePath = nil
-	ok, err := spv.Verify(ctx, cp, &spv.GullibleHeadersClient{}, nil)
+	ok, err := spv.VerifyScripts(ctx, cp)
 	return err == nil && ok
 }
 
@@ -641,8 +646,8 @@ func (e *txEnv) transactionVectors() (map[string]any, error) {
 
 	// Unlocking, after finality and before the lock, as bcommon
 	// carrier.Validate orders them.
-	add(txCase{name: "carrier-unlock-high-s", note: "carrier-envelope-note with its input signature's high-S twin, which verifies: another txid, same record", rule: "signatures",
-		tx: rewriteUnlock(k1, 0, func(sg []byte) []byte { return push(append(highSBytes(sg[:len(sg)-1]), sg[len(sg)-1])) }), reason: "unlock"})
+	add(txCase{name: "carrier-unlock-high-s", note: "carrier-envelope-note with its input signature's high-S twin: another txid, same record; the script interpreter refuses it too (go-sdk after v1.7.1)", rule: "signatures",
+		tx: rewriteUnlock(k1, 0, func(sg []byte) []byte { return push(append(highSBytes(sg[:len(sg)-1]), sg[len(sg)-1])) }), reason: "unlock", scriptsRefused: true})
 	add(txCase{name: "carrier-unlock-pushdata1", note: "carrier-envelope-note with its signature pushed by OP_PUSHDATA1", rule: "carrier shape",
 		tx: rewriteUnlock(k1, 0, func(sg []byte) []byte { return append([]byte{script.OpPUSHDATA1, byte(len(sg))}, sg...) }), reason: "unlock"})
 	add(txCase{name: "carrier-unlock-extra-push", note: "carrier-envelope-note with OP_0 pushed before its signature", rule: "carrier shape",
@@ -764,8 +769,8 @@ func (e *txEnv) transactionVectors() (map[string]any, error) {
 			in := c.tx.Inputs[i]
 			j.Coins = append(j.Coins, coinJSON{InputIndex: i, Txid: in.SourceTXID.String(), Vout: in.SourceTxOutIndex})
 		}
-		if !j.Scripts {
-			return nil, fmt.Errorf("%s: its own scripts do not verify", c.name)
+		if j.Scripts == c.scriptsRefused {
+			return nil, fmt.Errorf("%s: scriptsVerify is %v, want %v", c.name, j.Scripts, !c.scriptsRefused)
 		}
 		switch {
 		case c.reason == "" && err != nil:
@@ -789,7 +794,7 @@ func (e *txEnv) transactionVectors() (map[string]any, error) {
 		headers = append(headers, map[string]any{"height": ht, "merkleRoot": e.c.headers[ht].String()})
 	}
 	return map[string]any{
-		"description":             "Transactions admitted or refused by the topic manager's rules (docs/spec.md section 8.1), in the order given there. Each case is the transaction as raw hex and as the BEEF submitted (Atomic BEEF unless the case says otherwise: an unmined transaction's with its ancestry to a mined parent, a mined transaction's with its own proof and no parents), and the previous coins it is admitted with: the inputs that spend an output the topic holds once the admitted cases are admitted, as the overlay engine hands them to the topic manager (inputIndex), each with the outpoint it spends (txid in display order). Admission runs against the office and the headers below, with a BEEF bound of maxBeef bytes. A refusal is raised, never answered with empty instructions. admits lists the admittance instructions (outputsToAdmit, coinsToRetain) and what the lookup service records: a carrier's commitment (hash byte order), record, owner and funding outpoint, and a sweep's spent outpoints. scriptsVerify says every input of the transaction passes the script interpreter against the output it spends, so the engine's SPV does not refuse a case for its scripts: each refusal is made by the rule the case names and by no earlier one. rule names the frozen-list row a refusal exercises. Signatures are deterministic (RFC 6979), so the bytes are reproducible.",
+		"description":             "Transactions admitted or refused by the topic manager's rules (docs/spec.md section 8.1), in the order given there. Each case is the transaction as raw hex and as the BEEF submitted (Atomic BEEF unless the case says otherwise: an unmined transaction's with its ancestry to a mined parent, a mined transaction's with its own proof and no parents), and the previous coins it is admitted with: the inputs that spend an output the topic holds once the admitted cases are admitted, as the overlay engine hands them to the topic manager (inputIndex), each with the outpoint it spends (txid in display order). Admission runs against the office and the headers below, with a BEEF bound of maxBeef bytes. A refusal is raised, never answered with empty instructions. admits lists the admittance instructions (outputsToAdmit, coinsToRetain) and what the lookup service records: a carrier's commitment (hash byte order), record, owner and funding outpoint, and a sweep's spent outpoints. scriptsVerify says every input of the transaction passes the script interpreter against the output it spends, so the engine's SPV does not refuse a case for its scripts: each refusal is made by the rule the case names and by no earlier one. A case whose scriptsVerify is false is one the interpreter itself refuses (a high-S input signature): a host's engine refuses it before the topic manager, which refuses it too, for the rule named. rule names the frozen-list row a refusal exercises. Signatures are deterministic (RFC 6979), so the bytes are reproducible.",
 		"office":                  Office,
 		"topic":                   boxrec.TopicPrefix + Office,
 		"maxBeef":                 boxrec.DefaultMaxBEEF,

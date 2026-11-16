@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/bsv-blockchain/go-sdk/chainhash"
-	"github.com/bsv-blockchain/go-sdk/spv"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
 	"github.com/lightwebinc/bcommon/guard"
+	"github.com/lightwebinc/bcommon/verify"
 
 	"github.com/lightwebinc/bbox/boxrec"
 )
@@ -158,8 +158,9 @@ func (h *Host) submit(w http.ResponseWriter, r *http.Request) {
 		steak(nil, nil)
 		return
 	}
-	ok, verr := spv.Verify(context.Background(), tx, h.chain, nil)
-	if verr != nil || !ok {
+	// The carrier is not final by design: the overlay plane's SPV, as a
+	// host runs it, not go-sdk's spv.Verify.
+	if v, verr := verify.Check(context.Background(), tx, h.chain); v != verify.Passed {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("SPV: %v", verr))
 		return
 	}

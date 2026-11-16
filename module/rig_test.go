@@ -18,7 +18,6 @@ import (
 	"github.com/bsv-blockchain/go-sdk/overlay/lookup"
 	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
 	"github.com/bsv-blockchain/go-sdk/script"
-	"github.com/bsv-blockchain/go-sdk/spv"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/bsv-blockchain/go-sdk/wallet"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/lightwebinc/bcommon/guard"
 	bmodule "github.com/lightwebinc/bcommon/module"
 	"github.com/lightwebinc/bcommon/termsroute"
+	"github.com/lightwebinc/bcommon/verify"
 
 	"github.com/lightwebinc/bbox/boxrec"
 )
@@ -696,7 +696,8 @@ func (e *engine) admit(raw []byte, t string) ([]uint32, error) {
 		return []uint32{}, nil
 	}
 	if e.spv {
-		if ok, err := spv.Verify(context.Background(), tx, e.chain, nil); err != nil || !ok {
+		// The overlay plane's SPV: a carrier is not final by design.
+		if v, err := verify.Check(context.Background(), tx, e.chain); v != verify.Passed {
 			return nil, fmt.Errorf("the engine's SPV refused it: %v", err)
 		}
 	}
