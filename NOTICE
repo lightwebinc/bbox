@@ -71,6 +71,7 @@ this notice does not modify those licenses.
 
   github.com/bsv-blockchain/go-sdk             Apache License 2.0
   github.com/lightwebinc/bcommon               Apache License 2.0
+  github.com/lightwebinc/bcommon/devkit        Apache License 2.0
   github.com/mrz1836/go-whatsonchain           MIT License
   github.com/pkg/errors                        BSD License
   github.com/stretchr/testify                  MIT License
@@ -78,11 +79,13 @@ this notice does not modify those licenses.
   golang.org/x/crypto                          BSD License
   golang.org/x/net                             BSD License
 
-Two DIRECT dependencies, github.com/bsv-blockchain/go-sdk and
-github.com/lightwebinc/bcommon, are a rule this repository enforces in
-CI. bcommon is Lightweb Inc.'s library of the generic building blocks
-bbox is made from, published separately under Apache-2.0. go-sdk brings
-the other six with it, and a statically linked binary contains them
+Three DIRECT dependencies, github.com/bsv-blockchain/go-sdk,
+github.com/lightwebinc/bcommon and github.com/lightwebinc/bcommon/devkit,
+are a rule this repository enforces in CI. bcommon is Lightweb Inc.'s
+library of the generic building blocks bbox is made from, published
+separately under Apache-2.0; its devkit is the local stand-in chain,
+linked only into the devchain and vectors commands. go-sdk brings the
+other six with it, and a statically linked binary contains them
 whether they were asked for directly or not.
 
 The overlay host module under host/ is a separate npm package, and what
@@ -113,8 +116,9 @@ with every image. The ISC License, which no module ships, is reproduced
 in this notice instead.
 
 Section 4(d) of the Apache License asks for more than its text: where a
-module ships a NOTICE file, its attribution notices travel too. Three of
-the modules above ship one, and their attribution notices are these:
+module ships a NOTICE file, its attribution notices travel too. Four of
+the modules above ship one (bcommon's devkit ships bcommon's), and their
+attribution notices are these:
 
   go.yaml.in/yaml/v3
     Copyright 2011-2016 Canonical Ltd.
