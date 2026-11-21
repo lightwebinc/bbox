@@ -429,7 +429,11 @@ func TestPaymentVectorsFromFile(t *testing.T) {
 	}
 	var accepted int
 	for _, c := range f.Payments {
-		tx, pay, plain, err := recipientView(context.Background(), w, headers, unhex(t, c.Record), c.Now)
+		var from []byte
+		if c.CheckFrom != "" {
+			from = unhex(t, c.CheckFrom)
+		}
+		tx, pay, plain, err := recipientView(context.Background(), w, headers, unhex(t, c.Record), c.Now, from)
 		if string(plain) != c.Plaintext {
 			t.Errorf("%s: plaintext differs", c.Name)
 		}

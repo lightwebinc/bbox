@@ -296,7 +296,11 @@ this order, and refuses for the first check broken with that check's label:
    `created + 7200` (section 10);
 6. `payment-late`: `now >= expires - 3600`, at the recipient's time `now`;
 7. `payment-beef`: `beef` is not an Atomic BEEF that parses, with its
-   subject transaction;
+   subject transaction. It is read first as bcommon's guard reads a BEEF:
+   at most 16 KiB, one BEEF with nothing after it, every transaction with
+   an input, every count and script length inside a transaction written in
+   its shortest form, and only the data formats, has-BUMP bytes and BUMP
+   indices BRC-62 and BRC-96 define;
 8. `payment-output`: a listed output does not exist, does not hold the
    `satoshis` listed, or is not P2PKH to the key the recipient's wallet
    derives under BRC-29 (protocol `[2, "3241645161d8"]`, key id
@@ -1102,7 +1106,7 @@ by the Go side (`make verify` runs both directions).
 | `derivation-v1.json` | the registry values; the keys each test identity derives for `envelope` and `signature` under counterparty `anyone`; the SDK's refusal of `[1, "bbox"]`; two offices with one readable part and different suffixes, and one suffix drawn from fixed bytes |
 | `refusal-v1.json` | byte strings the record and content rules refuse, each with its reason (sections 3.1, 4.6 and 5), and what admission does with an output whose first field it is: skip one that claims no record, or refuse for the reason of the record it claims (which differs where the magic names the other record). Content cases pass every earlier rule and break exactly one |
 | `transaction-v1.json` | transactions as BEEF, each with the previous coins it is admitted with, admitted or refused by the rules of section 8.1 in their order: envelope and receipt carriers, a published funding tree, a sweep and a spend of what the topic holds; and refusals of every carrier rule (shape, BEEF, record, office, mineable, unlock, lock, signature, funding, content), of sweeps and of transactions that are not bbox's. Every input of every case passes the script interpreter, so each refusal is made by its rule alone, except `carrier-unlock-high-s`, whose high-S input signature the interpreter refuses too; a few cases break two rules and are refused for the earlier |
-| `payment-v1.json` | envelopes whose encrypted plaintext carries a payment (sections 4.5 and 10), which the recipient decrypts through its wallet and checks: accepted payments with the outputs it internalizes, and refusals of the plaintext (the reference cap among them), the payment's shape, its timing, its BEEF, its outputs and its SPV, in the order of section 4.7. These are the recipient client's checks, never a host's |
+| `payment-v1.json` | envelopes whose encrypted plaintext carries a payment (sections 4.5 and 10), which the recipient decrypts through its wallet and checks: accepted payments with the outputs it internalizes, and refusals of the plaintext (the reference cap among them), the payment's shape, its timing, its BEEF (each rule of the guard's reading in step 7 that a parser could pass over), its outputs and its SPV, in the order of section 4.7. A case with `checkFrom` hands the payment check a sender key no record that decodes carries, which the check refuses as `identity`. These are the recipient client's checks, never a host's |
 
 The vectors' office is `example_office_qzxkvbmwtr`; its suffix is a fixed
 example so that the vectors are reproducible. The sender's test key is 32

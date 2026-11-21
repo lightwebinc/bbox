@@ -6,6 +6,8 @@
  * of these is a host rule.
  */
 import { Beef, type ChainTracker, type Transaction, type WalletInterface } from '@bsv/sdk'
+import { checkBEEF, strictPublicKey } from '@lightwebinc/bcommon'
+import { wideCount } from './beef.js'
 import { Refusal, type Envelope } from './boxrec.js'
 import { BRC78Min, parseCanonicalObject, type Content } from './content.js'
 import { JObject } from './jcs.js'
@@ -147,27 +149,35 @@ export function parsePlaintext(b: Uint8Array): Plaintext {
 
 /**
  * What a recipient checks before it internalizes a payment from envelope e
- * at its time now, in order: payment-expires, payment-late, payment-beef,
- * payment-output (each listed output exists, holds the satoshis listed and
- * is P2PKH to the key the recipient's wallet derives under BRC-29 for the
- * prefix, the suffix and the sender), payment-spv. Returns the payment
- * transaction, for the wallet's internalizeAction.
+ * at its time now, in order: payment-expires, payment-late, payment-beef (an
+ * Atomic BEEF that parses, with its subject, read first as the Go
+ * guard.ParseBEEF reads it: at most 16 KiB, one BEEF with nothing after it,
+ * each transaction with an input, every count and script length inside a
+ * transaction in its shortest form, and only the data formats, has-BUMP
+ * bytes and BUMP indices BRC-62 and BRC-96 define), the sender's key in its
+ * one canonical encoding (identity, which every envelope that decoded
+ * has), payment-output (each listed output exists, holds the satoshis
+ * listed and is P2PKH to the key the recipient's wallet derives under
+ * BRC-29 for the prefix, the suffix and the sender), payment-spv. Returns
+ * the payment transaction, for the wallet's internalizeAction. The twin of
+ * the Go CheckPayment, refusing what it refuses for the same reason.
  */
 export async function checkPayment(w: Wallet, e: Envelope, p: Payment, headers: ChainTracker, now: number): Promise<Transaction> {
   if (e.expires === 0 || e.expires < e.created + PaymentMinLife) throw new Refusal('payment-expires')
   if (now + PaymentMargin >= e.expires) throw new Refusal('payment-late')
   const b = p.beef
   if (b.length < 4 || b[0] !== 0x01 || b[1] !== 0x01 || b[2] !== 0x01 || b[3] !== 0x01) throw new Refusal('payment-beef', 'not Atomic BEEF')
+  const why = checkBEEF(b, MaxPaymentBEEF) ?? wideCount(b)
+  if (why !== undefined) throw new Refusal('payment-beef', why)
   let tx: Transaction | undefined
   try {
-    if (b.length > MaxPaymentBEEF) throw new Error('over the bound')
     const beef = Beef.fromBinaryView(Uint8Array.from(b))
-    if (beef.txs.some((t) => t.tx !== undefined && t.tx.inputs.length === 0)) throw new Error('a transaction of no inputs')
     tx = beef.findAtomicTransaction(beef.atomicTxid!)
   } catch (err) {
     throw new Refusal('payment-beef', (err as Error).message)
   }
   if (tx === undefined) throw new Refusal('payment-beef', 'no subject')
+  if (strictPublicKey(e.from) === undefined) throw new Refusal('identity')
   for (const o of p.outputs) {
     const out = tx.outputs[o.outputIndex]
     if (out === undefined) throw new Refusal('payment-output', `output ${o.outputIndex} of ${tx.outputs.length}`)

@@ -162,7 +162,7 @@ func TestTypeScriptWrittenVectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, pay, _, err := recipientView(ctx, w, headers, unhex(t, v.Envelopes[1].Record), v.Payment.Now)
+	tx, pay, _, err := recipientView(ctx, w, headers, unhex(t, v.Envelopes[1].Record), v.Payment.Now, nil)
 	if err != nil {
 		t.Fatalf("the TypeScript payment is refused: %v", err)
 	}
