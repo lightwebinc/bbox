@@ -4,14 +4,18 @@
  * backends and prints, per condition, what B decided and what every read
  * path saw (seam-module.mjs names the paths p1..p4).
  *
- *   engine   @bsv/overlay 2.3.1 Engine in this process, on the engine's own
+ *   engine   @bsv/overlay 2.8.0 Engine in this process, on the engine's own
  *            KnexStorage over MySQL. Restore is a new Engine and a new module
  *            over the same database. Eviction is reachable here only.
- *   refhost  the v0.2.2 reference host (A13_REFHOST: its directory, built,
- *            with its node_modules) as child processes on MySQL, the
+ *   refhost  a reference host (A13_REFHOST: its directory, built, with its
+ *            node_modules) as child processes on MySQL, the
  *            module loaded by OVERLAY_MODULES, submits over HTTP. Restore is
  *            a process restart. GASP is two hosts, the second syncing from
  *            the first through /admin/startGASPSync.
+ *
+ * results/ holds the 2026-10-01 runs, on @bsv/overlay 2.3.1 and reference
+ * host 0.2.2; each file records the engine it ran. They have not been
+ * re-run on 2.8.0.
  *
  * Needs Node 24 and a throwaway MySQL. Not part of `make verify`.
  *
@@ -478,7 +482,7 @@ async function main() {
       return n
     },
   }
-  const results = { backend: args.backend, trials: N, run: RUN, started: new Date().toISOString(), engine: '@bsv/overlay 2.3.1', scenarios: {} }
+  const results = { backend: args.backend, trials: N, run: RUN, started: new Date().toISOString(), engine: '@bsv/overlay 2.8.0', scenarios: {} }
   if (args.backend === 'refhost') results.refhost = JSON.parse(readFileSync(join(REFHOST, 'package.json'), 'utf8')).version
   const names = args.only !== undefined ? args.only.split(',') : Object.keys(scenarios)
   try {

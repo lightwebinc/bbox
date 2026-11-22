@@ -92,6 +92,6 @@ jobs:
       - name: images
         run: |
           make docker-build
-          make docker-build-host REFERENCE_HOST_IMAGE=${{ vars.REFERENCE_HOST_IMAGE || 'ghcr.io/lightwebinc/overlay-blueprints:0.2.2' }}
+          make docker-build-host REFERENCE_HOST_IMAGE=${{ vars.REFERENCE_HOST_IMAGE || 'ghcr.io/lightwebinc/overlay-blueprints:0.5.0' }}
       - name: the quickstart, as written
         run: make quickstart-check
