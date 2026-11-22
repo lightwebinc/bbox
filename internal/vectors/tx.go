@@ -750,6 +750,39 @@ func (e *txEnv) transactionVectors() (map[string]any, error) {
 	add(txCase{name: "spend-not-held", note: "spend-tombstone offered with no previous coins: the topic does not hold what it spends", rule: "sweep",
 		tx: signAll(spend), held: []int{}, reason: "not-bbox"})
 
+	// The BEEF as bcommon's guard reads it before go-sdk parses it: each
+	// case is carrier-envelope-note's BEEF with one thing changed that a
+	// parser could pass over. Its Atomic BEEF holds BEEF V2: the funding
+	// tree under BUMP 0 (data format 1), then the carrier (data format 0).
+	atomic1, err := k1.AtomicBEEF(false)
+	if err != nil {
+		return nil, err
+	}
+	treeRaw, k1Raw := e.tree.Bytes(), k1.Bytes()
+	treeAt, k1At := bytes.Index(atomic1, treeRaw), bytes.Index(atomic1, k1Raw)
+	if treeAt < 2 || atomic1[treeAt-2] != 1 || atomic1[treeAt-1] != 0 || k1At < 1 || atomic1[k1At-1] != 0 {
+		return nil, fmt.Errorf("carrier-envelope-note's Atomic BEEF is not the tree under BUMP 0, then the carrier")
+	}
+	hasBump := bytes.Index(v1, treeRaw) + len(treeRaw)
+	if v1[hasBump] != 1 {
+		return nil, fmt.Errorf("carrier-beef-v1 does not flag the funding tree as proven")
+	}
+	wideK1 := wideCount(k1, "outputs")
+	wideAtomic := replaceOnce(atomic1, k1Raw, wideK1)
+	first := sha256.Sum256(wideK1)
+	wideID := sha256.Sum256(first[:])
+	copy(wideAtomic[4:36], wideID[:])
+	add(txCase{name: "carrier-beef-data-format", note: "carrier-envelope-note's Atomic BEEF with the carrier's entry in data format 3, which BRC-96 does not define, in place of 0", rule: "carrier shape",
+		tx: k1, beef: setByte(atomic1, k1At-1, 3), reason: "beef"})
+	add(txCase{name: "carrier-beef-bump-index", note: "carrier-envelope-note's Atomic BEEF with the funding tree naming BUMP 1 of its one BUMP", rule: "carrier shape",
+		tx: k1, beef: setByte(atomic1, treeAt-1, 1), reason: "beef"})
+	add(txCase{name: "carrier-beef-v1-bump-flag", note: "carrier-beef-v1 with the funding tree's has-BUMP byte 2 in place of 1", rule: "carrier shape",
+		tx: k1, beef: setByte(v1, hasBump, 2), reason: "beef"})
+	add(txCase{name: "carrier-beef-count-wide", note: "carrier-envelope-note with its output count written in three bytes, fd 01 00, where 01 is its shortest form, under an Atomic BEEF whose subject is the hash of the bytes as written: one transaction with two ids", rule: "carrier shape",
+		tx: k1, beef: wideAtomic, reason: "beef"})
+	add(txCase{name: "carrier-beef-tree-count-wide", note: "carrier-envelope-note with its funding tree's input count written in three bytes rather than one", rule: "carrier shape",
+		tx: k1, beef: replaceOnce(atomic1, treeRaw, wideCount(e.tree, "inputs")), reason: "beef"})
+
 	var list []txJSON
 	for _, c := range cases {
 		beef := c.beef
@@ -794,7 +827,7 @@ func (e *txEnv) transactionVectors() (map[string]any, error) {
 		headers = append(headers, map[string]any{"height": ht, "merkleRoot": e.c.headers[ht].String()})
 	}
 	return map[string]any{
-		"description":             "Transactions admitted or refused by the topic manager's rules (docs/spec.md section 8.1), in the order given there. Each case is the transaction as raw hex and as the BEEF submitted (Atomic BEEF unless the case says otherwise: an unmined transaction's with its ancestry to a mined parent, a mined transaction's with its own proof and no parents), and the previous coins it is admitted with: the inputs that spend an output the topic holds once the admitted cases are admitted, as the overlay engine hands them to the topic manager (inputIndex), each with the outpoint it spends (txid in display order). Admission runs against the office and the headers below, with a BEEF bound of maxBeef bytes. A refusal is raised, never answered with empty instructions. admits lists the admittance instructions (outputsToAdmit, coinsToRetain) and what the lookup service records: a carrier's commitment (hash byte order), record, owner and funding outpoint, and a sweep's spent outpoints. scriptsVerify says every input of the transaction passes the script interpreter against the output it spends, so the engine's SPV does not refuse a case for its scripts: each refusal is made by the rule the case names and by no earlier one. A case whose scriptsVerify is false is one the interpreter itself refuses (a high-S input signature): a host's engine refuses it before the topic manager, which refuses it too, for the rule named. rule names the frozen-list row a refusal exercises. Signatures are deterministic (RFC 6979), so the bytes are reproducible.",
+		"description":             "Transactions admitted or refused by the topic manager's rules (docs/spec.md section 8.1), in the order given there. Each case is the transaction as raw hex and as the BEEF submitted (Atomic BEEF unless the case says otherwise: an unmined transaction's with its ancestry to a mined parent, a mined transaction's with its own proof and no parents), and the previous coins it is admitted with: the inputs that spend an output the topic holds once the admitted cases are admitted, as the overlay engine hands them to the topic manager (inputIndex), each with the outpoint it spends (txid in display order). Admission runs against the office and the headers below, with a BEEF bound of maxBeef bytes. A refusal is raised, never answered with empty instructions. admits lists the admittance instructions (outputsToAdmit, coinsToRetain) and what the lookup service records: a carrier's commitment (hash byte order), record, owner and funding outpoint, and a sweep's spent outpoints. scriptsVerify says every input of the transaction passes the script interpreter against the output it spends, so the engine's SPV does not refuse a case for its scripts: each refusal is made by the rule the case names and by no earlier one. The beef rule reads the BEEF as bcommon's guard does before the SDK parses it: every count and script length inside a transaction in its shortest form, and only the data formats, has-BUMP bytes and BUMP indices BRC-62 and BRC-96 define. A case whose scriptsVerify is false is one the interpreter itself refuses (a high-S input signature): a host's engine refuses it before the topic manager, which refuses it too, for the rule named. rule names the frozen-list row a refusal exercises. Signatures are deterministic (RFC 6979), so the bytes are reproducible.",
 		"office":                  Office,
 		"topic":                   boxrec.TopicPrefix + Office,
 		"maxBeef":                 boxrec.DefaultMaxBEEF,

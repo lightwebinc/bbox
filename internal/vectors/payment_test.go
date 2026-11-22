@@ -112,3 +112,37 @@ func TestPaymentBEEFCasesBreakOneGuardRule(t *testing.T) {
 		t.Errorf("no case %s", name)
 	}
 }
+
+// TestTransactionBEEFCasesBreakOneGuardRule is the same for the admission
+// cases: each breaks the one rule of bcommon's guard it names, and the beef
+// rule refuses it before any later rule.
+func TestTransactionBEEFCasesBreakOneGuardRule(t *testing.T) {
+	want := map[string]string{
+		"carrier-beef-data-format":     "transaction 1 data format 3",
+		"carrier-beef-bump-index":      "transaction 0 names BUMP 1 of 1",
+		"carrier-beef-v1-bump-flag":    "transaction 0 has-BUMP byte 2",
+		"carrier-beef-count-wide":      "transaction 1: the count 1 is not written in its shortest form",
+		"carrier-beef-tree-count-wide": "transaction 0: the count 1 is not written in its shortest form",
+	}
+	var f struct {
+		MaxBEEF      int `json:"maxBeef"`
+		Transactions []struct {
+			Name string `json:"name"`
+			BEEF string `json:"beef"`
+		} `json:"transactions"`
+	}
+	load(t, "transaction-v1.json", &f)
+	for _, c := range f.Transactions {
+		rule, ok := want[c.Name]
+		if !ok {
+			continue
+		}
+		delete(want, c.Name)
+		if err := guard.CheckBEEF(unhex(t, c.BEEF), f.MaxBEEF); err == nil || !strings.HasSuffix(err.Error(), rule) {
+			t.Errorf("%s: the guard says %v, want %q", c.Name, err, rule)
+		}
+	}
+	for name := range want {
+		t.Errorf("no case %s", name)
+	}
+}
