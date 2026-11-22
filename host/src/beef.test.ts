@@ -1,7 +1,7 @@
 /**
  * The shortest-form rule of the payment check's BEEF reading (wideCount),
- * against the structural walk bcommon's checkBEEF does before it: what the
- * Go guard refuses inside a transaction, and what it leaves alone outside.
+ * beside bcommon's checkBEEF (which, from 0.36.0, refuses a wide count too):
+ * what the Go guard refuses inside a transaction, and what it leaves alone outside.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -47,7 +47,8 @@ test('a count inside a transaction written wider than its shortest form is refus
   assert.equal(wideCount(beef(shortest)), undefined)
   for (const wide of [fd, fe, ff]) {
     const b = beef(wide)
-    assert.equal(checkBEEF(b, bound), undefined, 'the structural walk passes it')
+    // bcommon 0.36.0's checkBEEF refuses the wide count itself; wideCount names it by transaction and field.
+    assert.match(checkBEEF(b, bound) ?? '', /is not written in its shortest form$/)
     assert.match(wideCount(b) ?? '', /^transaction 0: the input count 1 is not written in its shortest form$/)
   }
 })
@@ -55,7 +56,7 @@ test('a count inside a transaction written wider than its shortest form is refus
 test('a script length that needs three bytes is in its shortest form there, and wide in five', () => {
   assert.equal(wideCount(beef(shortest, 0xfd)), undefined)
   const b = beef((n) => (n === 0xfd ? fe(n) : shortest(n)), 0xfd)
-  assert.equal(checkBEEF(b, bound), undefined)
+  assert.match(checkBEEF(b, bound) ?? '', /^the count 253 is not written in its shortest form$/)
   assert.equal(wideCount(b), "transaction 0: input 0's script length 253 is not written in its shortest form")
 })
 

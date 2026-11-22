@@ -4,7 +4,7 @@
  * backends and prints, per condition, what B decided and what every read
  * path saw (seam-module.mjs names the paths p1..p4).
  *
- *   engine   @bsv/overlay 2.3.1 Engine in this process, on the engine's own
+ *   engine   @bsv/overlay 2.8.0 Engine in this process, on the engine's own
  *            KnexStorage over MySQL. Restore is a new Engine and a new module
  *            over the same database. Eviction is reachable here only.
  *   refhost  the v0.2.2 reference host (A13_REFHOST: its directory, built,
@@ -478,7 +478,7 @@ async function main() {
       return n
     },
   }
-  const results = { backend: args.backend, trials: N, run: RUN, started: new Date().toISOString(), engine: '@bsv/overlay 2.3.1', scenarios: {} }
+  const results = { backend: args.backend, trials: N, run: RUN, started: new Date().toISOString(), engine: '@bsv/overlay 2.8.0', scenarios: {} }
   if (args.backend === 'refhost') results.refhost = JSON.parse(readFileSync(join(REFHOST, 'package.json'), 'utf8')).version
   const names = args.only !== undefined ? args.only.split(',') : Object.keys(scenarios)
   try {

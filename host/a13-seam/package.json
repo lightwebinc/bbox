@@ -7,8 +7,8 @@
   "type": "module",
   "engines": { "node": ">=24 <27" },
   "dependencies": {
-    "@bsv/overlay": "2.3.1",
-    "@bsv/sdk": "2.7.1",
+    "@bsv/overlay": "2.8.0",
+    "@bsv/sdk": "4.1.2",
     "knex": "3.3.0",
     "mysql2": "3.24.6"
   }

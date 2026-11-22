@@ -1,6 +1,6 @@
 {
   "name": "@lightwebinc/bbox-host",
-  "version": "0.6.11",
+  "version": "0.6.12",
   "private": true,
   "description": "The bbox record layer in TypeScript and the host module for an overlay host: envelope and receipt records, the BRC-169 content and its JSON subset, office and box names, lookup questions, the topic manager's transaction rules and the recipient's payment checks, held to the Go codec's vectors, and tm_bbox with ls_bbox as a module the host loads by path",
   "license": "Apache-2.0",
@@ -50,16 +50,16 @@
     "prepack": "npm run build -- --sourceMap false && node -e \"for (const f of ['LICENSE', 'NOTICE']) require('node:fs').copyFileSync('../' + f, f)\""
   },
   "dependencies": {
-    "@bsv/sdk": "2.7.1"
+    "@bsv/sdk": "4.1.2"
   },
   "devDependencies": {
-    "@bsv/overlay": "2.3.1",
-    "@lightwebinc/bcommon": "file:vendor/lightwebinc-bcommon-0.35.3.tgz",
+    "@bsv/overlay": "2.8.0",
+    "@lightwebinc/bcommon": "file:vendor/lightwebinc-bcommon-0.37.0.tgz",
     "@types/node": "^26.0.0",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
   "peerDependencies": {
-    "@lightwebinc/bcommon": "^0.35.3"
+    "@lightwebinc/bcommon": "^0.37.0"
   }
 }
