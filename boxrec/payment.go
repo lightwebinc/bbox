@@ -284,8 +284,10 @@ func P2PKH(key *ec.PublicKey) []byte {
 // CheckPayment is what a recipient checks before it internalizes a payment
 // from envelope e, at its time now, in order: payment-expires (e expires at
 // least PaymentMinLife after it was created), payment-late (now is before
-// expires - PaymentMargin), payment-beef (an Atomic BEEF that parses, with
-// its subject), payment-output (each listed output exists, holds the
+// expires - PaymentMargin), payment-beef (an Atomic BEEF that bcommon's
+// guard.ParseBEEF parses within MaxContent, with its subject), the sender's
+// key in its one canonical encoding (ErrIdentity, which every envelope that
+// decoded has), payment-output (each listed output exists, holds the
 // satoshis listed, and is P2PKH to the key the recipient's wallet derives
 // under BRC-29 for the prefix, the suffix and the sender), payment-spv (the
 // transaction verifies against the recipient's headers, BRC-67). It

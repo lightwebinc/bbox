@@ -363,6 +363,8 @@ test('every payment is accepted or refused by the recipient as the Go codec does
       now: number
       record: string
       plaintext: string
+      /** The sender key the payment check is handed in place of the record's. */
+      checkFrom?: string
       verdict: 'accept' | 'refuse'
       reason?: string
       paymentTxid?: string
@@ -372,17 +374,20 @@ test('every payment is accepted or refused by the recipient as the Go codec does
   const headers = chainTracker(v.headers)
   const w = new ProtoWallet(recipientKey)
   let accepted = 0
+  let checkedFrom = 0
   for (const p of v.payments) {
     const e = decodeEnvelope(fromHex(p.record))
     const c = checkContent(e)
     const plain = await open(w, c, e.from)
     assert.equal(new TextDecoder().decode(plain), p.plaintext, p.name)
+    const checked = p.checkFrom === undefined ? e : { ...e, from: fromHex(p.checkFrom) }
+    if (p.checkFrom !== undefined) checkedFrom++
     let got
     try {
       const pt = parsePlaintext(plain)
       const pay = pt.payment
       if (pay === undefined) throw new Error(`${p.name}: no payment`)
-      got = { pay, tx: await checkPayment(w, e, pay, headers, p.now) }
+      got = { pay, tx: await checkPayment(w, checked, pay, headers, p.now) }
     } catch (err) {
       if (!(err instanceof Refusal)) throw err
       assert.equal(p.verdict, 'refuse', `${p.name}: refused ${err.reason}: ${err.message}`)
@@ -397,7 +402,7 @@ test('every payment is accepted or refused by the recipient as the Go codec does
     )
     accepted++
   }
-  assert.ok(accepted > 0)
+  assert.ok(accepted > 0 && checkedFrom > 0)
   // Only the recipient opens the payment envelope.
   const first = decodeEnvelope(fromHex(v.payments[0]!.record))
   assert.equal(await reason(() => open(new ProtoWallet(otherKey), checkContent(first), first.from)), 'undecryptable')

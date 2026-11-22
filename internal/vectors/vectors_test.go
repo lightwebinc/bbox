@@ -362,6 +362,12 @@ func TestCarriersAgreeWithBcommon(t *testing.T) {
 	classify := func(p []byte) (bool, error) { return boxrec.ClaimOfField(p) != boxrec.KindNone, nil }
 	checked := 0
 	for _, c := range f.Transactions {
+		// Only the cases compared below are parsed: a BEEF refused for its
+		// bytes (beef) may be one go-sdk does not parse either.
+		admitted := c.Verdict == "admit" && (c.Admits.Kind == "envelope" || c.Admits.Kind == "receipt")
+		if !admitted && c.Name != "carrier-field-signature-high-s" && c.Reason != "mineable" && c.Reason != "unlock" && c.Reason != "lock" {
+			continue
+		}
 		tx, err := transaction.NewTransactionFromBEEF(unhex(t, c.BEEF))
 		if err != nil {
 			t.Fatalf("%s: %v", c.Name, err)
@@ -389,7 +395,7 @@ func TestCarriersAgreeWithBcommon(t *testing.T) {
 			return k.Validate(boxrec.Params(), owner)
 		}
 		switch {
-		case c.Verdict == "admit" && (c.Admits.Kind == "envelope" || c.Admits.Kind == "receipt"):
+		case admitted:
 			if err := verdict(); err != nil {
 				t.Errorf("%s: bcommon refuses an admitted carrier: %v", c.Name, err)
 			}
@@ -429,7 +435,11 @@ func TestPaymentVectorsFromFile(t *testing.T) {
 	}
 	var accepted int
 	for _, c := range f.Payments {
-		tx, pay, plain, err := recipientView(context.Background(), w, headers, unhex(t, c.Record), c.Now)
+		var from []byte
+		if c.CheckFrom != "" {
+			from = unhex(t, c.CheckFrom)
+		}
+		tx, pay, plain, err := recipientView(context.Background(), w, headers, unhex(t, c.Record), c.Now, from)
 		if string(plain) != c.Plaintext {
 			t.Errorf("%s: plaintext differs", c.Name)
 		}

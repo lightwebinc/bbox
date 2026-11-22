@@ -7,7 +7,7 @@
  * with empty instructions, so the engine records nothing for the txid.
  */
 import { Beef, type ChainTracker, type Transaction } from '@bsv/sdk'
-import { LockTime, MaxSequence, readerLockingKey, unlockingRefusal, verifyFieldSignature } from '@lightwebinc/bcommon'
+import { LockTime, MaxSequence, checkBEEF, readerLockingKey, unlockingRefusal, verifyFieldSignature } from '@lightwebinc/bcommon'
 import {
   KeyEnvelope,
   Protocol,
@@ -21,7 +21,7 @@ import {
   type Kind,
   type Receipt,
 } from './boxrec.js'
-import { DefaultMaxBEEF, beefCounts, minimalPath } from './beef.js'
+import { DefaultMaxBEEF, beefCounts, minimalPath, wideCount } from './beef.js'
 import { checkContent, type Content } from './content.js'
 import { fundingScript, isFundingShape, pushDropScript, pushFields, strictSignature } from './script.js'
 import { bytesEq, toHex } from './util.js'
@@ -77,21 +77,23 @@ export async function mined(tx: Transaction, headers?: ChainTracker): Promise<bo
 }
 
 /**
- * Parses the BEEF as bcommon's guard does before its parser runs: within the
- * bound, one BEEF with nothing after it, at least one transaction, every
- * transaction with at least one input and every proof with at least one
- * level. The subject is the Atomic BEEF's, or else the last transaction.
+ * Parses the BEEF as the Go Admit does (guard.ParseBEEF): read first as
+ * bcommon's guard reads it, before the SDK parses it (bcommon's checkBEEF,
+ * then the shortest-form rule, wideCount), so within the bound, one BEEF
+ * with nothing after it, at least one transaction, every transaction with
+ * at least one input, every proof with at least one level, every count and
+ * script length inside a transaction in its shortest form, and only the
+ * data formats, has-BUMP bytes and BUMP indices BRC-62 and BRC-96 define.
+ * The subject is the Atomic BEEF's, or else the last transaction.
  */
 function parseBEEF(raw: Uint8Array, bound: number): { beef: Beef; tx: Transaction } {
-  if (raw.length > bound) throw new Refusal('beef', `${raw.length} bytes, max ${bound}`)
+  const why = checkBEEF(raw, bound) ?? wideCount(raw)
+  if (why !== undefined) throw new Refusal('beef', why)
   let beef: Beef
   try {
     beef = Beef.fromBinaryView(Uint8Array.from(raw))
   } catch (e) {
     throw new Refusal('beef', (e as Error).message)
-  }
-  if (beef.txs.length === 0 || beef.bumps.some((b) => b.path.length === 0) || beef.txs.some((t) => t.tx !== undefined && t.tx.inputs.length === 0)) {
-    throw new Refusal('beef', 'an empty BEEF, proof or transaction')
   }
   const target = beef.atomicTxid ?? beef.txs.at(-1)!.txid
   const tx = beef.findAtomicTransaction(target)
