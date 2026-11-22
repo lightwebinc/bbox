@@ -95,7 +95,7 @@ export function wideCount(raw: Uint8Array): string | undefined {
     return undefined
   }
   if (raw.length >= 4 && raw[0] === 0x01 && raw[1] === 0x01 && raw[2] === 0x01 && raw[3] === 0x01) i = 4 + 32
-  const v2 = raw[i] === 0x02 // EF BE 00 02, little-endian
+  const v2 = raw[i] === 0x02 // version 0200BEEF (BRC-96) on the wire: first byte 0x02, then 00 BE EF
   i += 4
   const bumps = varInt().v
   for (let n = 0; n < bumps; n++) {
